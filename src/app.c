@@ -34,8 +34,11 @@ static void phone_to_radio_callback(const uint8_t* data, size_t len, void* conte
     if(app == NULL || app->tx_queue == NULL) return;
     if(!phone_decode_text_message(data, len, &text)) return;
 
+    app->phone_text_packets++;
+
     if(text.text_len > mesh_encode_max_text_len() || text.text_len > sizeof(tx.text)) {
         FURI_LOG_W("MeshApp", "phone text too large for LoRa frame");
+        app->tx_failed++;
         return;
     }
 
@@ -50,6 +53,7 @@ static void phone_to_radio_callback(const uint8_t* data, size_t len, void* conte
 
     if(furi_message_queue_put(app->tx_queue, &tx, 0) != FuriStatusOk) {
         FURI_LOG_W("MeshApp", "tx queue full");
+        app->tx_failed++;
     }
 }
 
@@ -83,8 +87,10 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
         }
 
         if(app->source->transmit != NULL && app->source->transmit(app->source, frame, frame_len)) {
+            app->tx_sent++;
             FURI_LOG_I("MeshApp", "sent phone text packet id=%lu", (unsigned long)params.id);
         } else {
+            app->tx_failed++;
             FURI_LOG_W("MeshApp", "radio transmit failed");
         }
     }
@@ -187,9 +193,11 @@ static int32_t radio_thread(void* context) {
                 phone_encode_received_mesh_packet(&app->rx_decoded, from_radio, sizeof(from_radio));
             if(from_radio_len > 0) {
                 if(!meshtastic_ble_service_queue(app->ble, from_radio, from_radio_len)) {
+                    app->phone_bridge_dropped++;
                     FURI_LOG_D("MeshApp", "phone bridge queue full");
                 }
             } else {
+                app->phone_bridge_dropped++;
                 FURI_LOG_D("MeshApp", "received packet too large for phone bridge");
             }
         }

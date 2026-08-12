@@ -84,6 +84,10 @@ typedef struct {
     FuriThread* thread;
     volatile bool running;
     FuriMessageQueue* tx_queue;
+    uint32_t phone_text_packets;
+    uint32_t tx_sent;
+    uint32_t tx_failed;
+    uint32_t phone_bridge_dropped;
 
     /* NULL when Bluetooth could not start. The app carries on without phone
      * support rather than refusing to run. */
