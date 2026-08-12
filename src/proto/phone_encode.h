@@ -31,6 +31,7 @@
 #include <stdint.h>
 
 #include "src/model/mesh_config.h"
+#include "src/proto/mesh_decode.h"
 
 /* FromRadio field numbers. mesh.proto, message FromRadio. */
 #define FROMRADIO_FIELD_PACKET             2
@@ -173,6 +174,18 @@ size_t phone_encode_device_ui(uint8_t* out, size_t out_len);
 size_t phone_encode_packet(
     const uint8_t* mesh_packet,
     size_t packet_len,
+    uint8_t* out,
+    size_t out_len);
+
+/* FromRadio { packet { from, to, decoded, id, hop_limit, ... } } from a
+ * decoded over-the-air frame.
+ *
+ * This is the bridge from "the Flipper heard a node" to "the phone heard a
+ * node". It intentionally forwards only frames whose Data protobuf parsed
+ * successfully; encrypted bytes that did not decrypt or malformed packets stay
+ * local to the diagnostics counters. */
+size_t phone_encode_received_mesh_packet(
+    const MeshDecoded* decoded,
     uint8_t* out,
     size_t out_len);
 

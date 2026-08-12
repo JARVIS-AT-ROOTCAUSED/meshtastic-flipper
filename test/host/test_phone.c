@@ -7,8 +7,11 @@
 #include "tinytest.h"
 
 #include "mesh_data.h"
+#include "mesh_channel.h"
+#include "mesh_decode.h"
 #include "pb_write.h"
 #include "phone_encode.h"
+#include "vectors.h"
 
 /* Minimal reader, so the tests verify structure rather than trusting the
    writer to agree with itself. */
@@ -65,6 +68,42 @@ static bool find_field(
                 return true;
             }
             r.pos += (size_t)size;
+        } else if(wire == 5) {
+            if(r.len - r.pos < 4) return false;
+            r.pos += 4;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
+static bool find_fixed32_field(const uint8_t* buf, size_t len, uint32_t want_field, uint32_t* out) {
+    Reader r = {buf, len, 0};
+    while(r.pos < r.len) {
+        uint64_t tag;
+        if(!read_varint(&r, &tag)) return false;
+        uint32_t field = (uint32_t)(tag >> 3);
+        uint8_t wire = (uint8_t)(tag & 0x07);
+
+        if(wire == 0) {
+            uint64_t ignored;
+            if(!read_varint(&r, &ignored)) return false;
+        } else if(wire == 2) {
+            uint64_t size;
+            if(!read_varint(&r, &size)) return false;
+            if(size > r.len - r.pos) return false;
+            r.pos += (size_t)size;
+        } else if(wire == 5) {
+            if(r.len - r.pos < 4) return false;
+            uint32_t value = (uint32_t)r.buf[r.pos] | ((uint32_t)r.buf[r.pos + 1] << 8) |
+                             ((uint32_t)r.buf[r.pos + 2] << 16) |
+                             ((uint32_t)r.buf[r.pos + 3] << 24);
+            r.pos += 4;
+            if(field == want_field) {
+                *out = value;
+                return true;
+            }
         } else {
             return false;
         }
@@ -302,6 +341,50 @@ TEST(test_packet_is_wrapped_in_field_2) {
     ASSERT_EQ_MEM(sub, payload, sizeof(payload));
 }
 
+TEST(test_received_radio_packet_is_forwarded_to_phone_shape) {
+    uint8_t key[MESH_PSK_LEN];
+    MeshDecoded decoded;
+    uint8_t out[192];
+    const uint8_t* packet = NULL;
+    const uint8_t* data = NULL;
+    size_t packet_len = 0;
+    size_t data_len = 0;
+    uint32_t fixed = 0;
+    uint64_t value = 0;
+
+    mesh_channel_expand_psk(1, key);
+    ASSERT_EQ_INT(mesh_decode_frame(VEC0_FRAME, VEC0_FRAME_LEN, key, VEC0_CHANNEL_HASH, &decoded), MESH_OK);
+
+    size_t len = phone_encode_received_mesh_packet(&decoded, out, sizeof(out));
+    ASSERT_TRUE(len > 0);
+    ASSERT_TRUE(find_field(out, len, FROMRADIO_FIELD_PACKET, NULL, &packet, &packet_len));
+    ASSERT_TRUE(find_fixed32_field(packet, packet_len, 1, &fixed));
+    ASSERT_EQ_INT(fixed, VEC0_FROM_NODE);
+    ASSERT_TRUE(find_fixed32_field(packet, packet_len, 2, &fixed));
+    ASSERT_EQ_INT(fixed, VEC0_TO_NODE);
+    ASSERT_TRUE(find_field(packet, packet_len, 4, NULL, &data, &data_len));
+    ASSERT_EQ_INT(data_len, VEC0_PLAINTEXT_LEN);
+    ASSERT_EQ_MEM(data, VEC0_PLAINTEXT, VEC0_PLAINTEXT_LEN);
+    ASSERT_TRUE(find_fixed32_field(packet, packet_len, 6, &fixed));
+    ASSERT_EQ_INT(fixed, VEC0_PACKET_ID);
+    ASSERT_TRUE(find_field(packet, packet_len, 9, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, VEC0_HOP_LIMIT);
+    ASSERT_TRUE(find_field(packet, packet_len, 15, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, VEC0_HOP_START);
+    ASSERT_TRUE(find_field(packet, packet_len, 21, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 1);
+}
+
+TEST(test_oversized_received_packet_is_not_forwarded) {
+    uint8_t key[MESH_PSK_LEN];
+    MeshDecoded decoded;
+    uint8_t out[192];
+
+    mesh_channel_expand_psk(1, key);
+    ASSERT_EQ_INT(mesh_decode_frame(VEC2_FRAME, VEC2_FRAME_LEN, key, VEC2_CHANNEL_HASH, &decoded), MESH_OK);
+    ASSERT_EQ_INT(phone_encode_received_mesh_packet(&decoded, out, sizeof(out)), 0);
+}
+
 /* ToRadio decode */
 
 TEST(test_decode_want_config_id) {
@@ -379,6 +462,8 @@ RUN_TEST(test_config_complete_uses_field_7);
 RUN_TEST(test_both_handshake_nonces_encode);
 RUN_TEST(test_config_complete_with_zero_nonce_still_writes);
 RUN_TEST(test_packet_is_wrapped_in_field_2);
+RUN_TEST(test_received_radio_packet_is_forwarded_to_phone_shape);
+RUN_TEST(test_oversized_received_packet_is_not_forwarded);
 RUN_TEST(test_decode_want_config_id);
 RUN_TEST(test_decode_skips_other_fields);
 RUN_TEST(test_decode_reports_absent_want_config_id);

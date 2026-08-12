@@ -16,8 +16,16 @@
 /* mesh.proto MeshPacket. from, to and id are fixed32, not varint. */
 #define MESHPACKET_FIELD_FROM    1
 #define MESHPACKET_FIELD_TO      2
+#define MESHPACKET_FIELD_CHANNEL 3
 #define MESHPACKET_FIELD_DECODED 4
 #define MESHPACKET_FIELD_ID      6
+#define MESHPACKET_FIELD_HOP_LIMIT 9
+#define MESHPACKET_FIELD_WANT_ACK 10
+#define MESHPACKET_FIELD_VIA_MQTT 14
+#define MESHPACKET_FIELD_HOP_START 15
+#define MESHPACKET_FIELD_NEXT_HOP 18
+#define MESHPACKET_FIELD_RELAY_NODE 19
+#define MESHPACKET_FIELD_TRANSPORT_MECHANISM 21
 
 /* mesh.proto Data. dest, source and request_id are fixed32. */
 #define DATA_FIELD_PORTNUM       1
@@ -151,6 +159,37 @@ size_t phone_encode_packet(
     pb_write_submessage(&frame, FROMRADIO_FIELD_PACKET, mesh_packet, packet_len);
 
     return pb_writer_ok(&frame) ? pb_writer_len(&frame) : 0;
+}
+
+size_t phone_encode_received_mesh_packet(
+    const MeshDecoded* decoded,
+    uint8_t* out,
+    size_t out_len) {
+    uint8_t packet[192];
+    PbWriter w;
+
+    if(decoded == NULL || out == NULL) return 0;
+    if(decoded->plaintext_len == 0) return 0;
+
+    pb_writer_init(&w, packet, sizeof(packet));
+    pb_write_fixed32_field_always(&w, MESHPACKET_FIELD_FROM, decoded->header.from);
+    pb_write_fixed32_field_always(&w, MESHPACKET_FIELD_TO, decoded->header.to);
+    /* channel is omitted for primary, matching the phone API's local channel
+     * index rather than the over-the-air channel hash. */
+    pb_write_submessage(&w, MESHPACKET_FIELD_DECODED, decoded->plaintext, decoded->plaintext_len);
+    pb_write_fixed32_field(&w, MESHPACKET_FIELD_ID, decoded->header.id);
+    pb_write_varint_field(&w, MESHPACKET_FIELD_HOP_LIMIT, mesh_header_hop_limit(&decoded->header));
+    pb_write_varint_field(
+        &w, MESHPACKET_FIELD_WANT_ACK, mesh_header_want_ack(&decoded->header) ? 1 : 0);
+    pb_write_varint_field(
+        &w, MESHPACKET_FIELD_VIA_MQTT, mesh_header_via_mqtt(&decoded->header) ? 1 : 0);
+    pb_write_varint_field(&w, MESHPACKET_FIELD_HOP_START, mesh_header_hop_start(&decoded->header));
+    pb_write_varint_field(&w, MESHPACKET_FIELD_NEXT_HOP, decoded->header.next_hop);
+    pb_write_varint_field(&w, MESHPACKET_FIELD_RELAY_NODE, decoded->header.relay_node);
+    pb_write_varint_field(&w, MESHPACKET_FIELD_TRANSPORT_MECHANISM, 1); /* TRANSPORT_LORA */
+
+    if(!pb_writer_ok(&w)) return 0;
+    return phone_encode_packet(packet, pb_writer_len(&w), out, out_len);
 }
 
 size_t phone_encode_queue_status(

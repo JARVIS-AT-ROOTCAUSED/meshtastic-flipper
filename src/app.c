@@ -7,6 +7,7 @@
 #include "src/model/mesh_event.h"
 #include "src/proto/mesh_user.h"
 #include "src/ble/meshtastic_profile.h"
+#include "src/ble/meshtastic_service.h"
 #include "src/radio/source_radio.h"
 #include "src/ui/app_view.h"
 
@@ -15,6 +16,9 @@
  * the hash real nodes put in the header. Confirmed against Channels::getHash. */
 #define PRIMARY_CHANNEL_NAME "LongFast"
 #define PRIMARY_PSK_INDEX    1
+/* Matches the BLE notification queue entry size. Larger received mesh packets
+ * are dropped until the BLE queue grows long-message support. */
+#define PHONE_BRIDGE_MESSAGE_MAX 192
 
 static void input_callback(InputEvent* event, void* context) {
     FuriMessageQueue* queue = context;
@@ -109,6 +113,19 @@ static int32_t radio_thread(void* context) {
         app->last_raw_len = copy;
 
         furi_mutex_release(app->mutex);
+
+        if(app->ble != NULL && (result == MESH_OK || result == MESH_ERR_NOT_TEXT)) {
+            uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
+            size_t from_radio_len =
+                phone_encode_received_mesh_packet(&app->rx_decoded, from_radio, sizeof(from_radio));
+            if(from_radio_len > 0) {
+                if(!meshtastic_ble_service_queue(app->ble, from_radio, from_radio_len)) {
+                    FURI_LOG_D("MeshApp", "phone bridge queue full");
+                }
+            } else {
+                FURI_LOG_D("MeshApp", "received packet too large for phone bridge");
+            }
+        }
 
         view_port_update(app->view_port);
     }
