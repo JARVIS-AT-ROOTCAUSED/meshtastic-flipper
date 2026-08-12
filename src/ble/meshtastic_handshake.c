@@ -83,13 +83,15 @@ bool handshake_handle_to_radio(
     if(!phone_decode_want_config_id(data, len, &nonce)) return false;
 
     if(nonce == PHONE_NONCE_CONFIG) {
-        /* Order follows the firmware's own state machine, PhoneAPI.cpp
-         * getFromRadio(): my_info, then the node's own NodeInfo, then metadata,
-         * then config_complete.
+        /* Fast BLE handshake for the Flipper GATT workaround.
          *
-         * The NodeInfo here is what carries this device's name. Sending it only
-         * in stage 2, as this did before, completed the handshake and still left
-         * the app showing a node with no name. */
+         * Firmware sends a long stage-one stream: identity, UI, node metadata,
+         * all channel slots, all config variants, all module variants, then
+         * config_complete. On Flipper we cannot answer FromRadio reads directly
+         * from the FAP; the service publishes queued values on a timer instead.
+         * A full 36-message stream outruns the iOS client's connection retry
+         * window. Send the fields that make the phone identify the node and
+         * radio, then finish the stage quickly. */
         written = phone_encode_my_node_info(
             &h->identity, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
         if(!push(reply, written)) return false;
@@ -106,46 +108,18 @@ bool handshake_handle_to_radio(
             &h->identity, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
         if(!push(reply, written)) return false;
 
-        /* Every channel slot, not just the one in use. STATE_SEND_CHANNELS
-         * walks the whole table before moving on, so a client that gets one
-         * channel is still waiting for seven more. Sending only the primary is
-         * why a complete looking stage one was still refused. */
-        for(uint32_t slot = 0; slot < PHONE_CHANNEL_SLOTS; slot++) {
-            if(slot == 0) {
-                written = phone_encode_primary_channel(
-                    h->config.channel.name,
-                    h->config.channel.psk_index,
-                    reply->messages[reply->count].data,
-                    HANDSHAKE_MAX_MESSAGE);
-            } else {
-                written = phone_encode_empty_channel(
-                    slot, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
-            }
-            if(!push(reply, written)) return false;
-        }
+        written = phone_encode_primary_channel(
+            h->config.channel.name,
+            h->config.channel.psk_index,
+            reply->messages[reply->count].data,
+            HANDSHAKE_MAX_MESSAGE);
+        if(!push(reply, written)) return false;
 
-        /* Every Config variant, in field order. LoRa is field 6 and carries
-         * real settings; the rest are empty, meaning all defaults, which is the
-         * truthful answer for a device that does not implement them. Skipping
-         * them is what made the client abandon stage one and reconnect. */
-        for(uint32_t variant = 1; variant <= PHONE_CONFIG_VARIANTS; variant++) {
-            if(variant == CONFIG_VARIANT_LORA) {
-                written = phone_encode_lora_config(
-                    h->config.lora.channel_num,
-                    reply->messages[reply->count].data,
-                    HANDSHAKE_MAX_MESSAGE);
-            } else {
-                written = phone_encode_config_variant(
-                    variant, NULL, 0, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
-            }
-            if(!push(reply, written)) return false;
-        }
-
-        for(uint32_t variant = 1; variant <= PHONE_MODULECONFIG_VARIANTS; variant++) {
-            written = phone_encode_moduleconfig_variant(
-                variant, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
-            if(!push(reply, written)) return false;
-        }
+        written = phone_encode_lora_config(
+            h->config.lora.channel_num,
+            reply->messages[reply->count].data,
+            HANDSHAKE_MAX_MESSAGE);
+        if(!push(reply, written)) return false;
 
         written = phone_encode_config_complete(
             PHONE_NONCE_CONFIG, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);

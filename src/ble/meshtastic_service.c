@@ -595,10 +595,10 @@ static BleEventAckStatus gatt_event_handler(void* event, void* context) {
     return BleEventAckFlowEnable;
 }
 
-/* 150ms per drain step. The client re-polls every 200ms
- * (BleRadioTransport.kt:77), so this stays ahead of it without running so far
- * ahead that a message is skipped. */
-#define DRAIN_INTERVAL_MS 150
+/* Keep the compatibility stream short and drain it inside the iOS retry
+ * window. The client polls FromRadio roughly every 200ms, so 75ms gives it
+ * fresh values without flooding the stack. */
+#define DRAIN_INTERVAL_MS 75
 
 /* Wake often enough to hold that interval, but not so often that an idle
  * connection spins. */

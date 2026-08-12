@@ -86,11 +86,11 @@ TEST(test_starts_idle) {
     ASSERT_TRUE(!handshake_is_complete(&h));
 }
 
-/* Stage 1 must carry this device's own NodeInfo, not just my_info.
- *
- * Sending the NodeInfo only in stage 2 still completed the handshake, and the
- * phone was left showing a node with no name. The order mirrors the firmware's
- * own state machine in PhoneAPI.cpp getFromRadio(). */
+/* Stage 1 must carry this device's own NodeInfo, not just my_info, but it also
+ * has to complete fast enough for the Flipper BLE workaround. The app publishes
+ * FromRadio messages from a timer rather than answering reads synchronously, so
+ * this compact sequence sends the useful identity/config records and then the
+ * sentinel. */
 TEST(test_stage_one_follows_the_firmware_order) {
     Handshake h;
     MeshConfig id = identity();
@@ -102,11 +102,9 @@ TEST(test_stage_one_follows_the_firmware_order) {
     size_t len = make_want_config(PHONE_NONCE_CONFIG, to_radio, sizeof(to_radio));
 
     ASSERT_TRUE(handshake_handle_to_radio(&h, to_radio, len, &reply));
-    /* my_info, own node_info, metadata, one channel, ten config variants,
-     * thirteen module config variants, config_complete. */
-    /* my_info, deviceuiConfig, own node_info, metadata, eight channel slots,
-     * ten config variants, thirteen module config variants, config_complete. */
-    ASSERT_EQ_INT(reply.count, 36);
+    /* my_info, deviceuiConfig, own node_info, metadata, primary channel,
+     * LoRa config, config_complete. */
+    ASSERT_EQ_INT(reply.count, 7);
 
     ASSERT_EQ_INT(reply.messages[0].data[0] >> 3, FROMRADIO_FIELD_MY_INFO);
     ASSERT_EQ_INT(reply.messages[1].data[0] >> 3, FROMRADIO_FIELD_DEVICEUI);
@@ -115,28 +113,16 @@ TEST(test_stage_one_follows_the_firmware_order) {
     /* metadata, the firmware version the app checks. */
     ASSERT_EQ_INT(reply.messages[3].data[0] >> 3, FROMRADIO_FIELD_METADATA);
 
-    /* All eight channel slots. A client that gets one channel is still waiting
-     * for seven more, which is why a complete looking stage one was refused. */
-    for(size_t i = 4; i < 4 + PHONE_CHANNEL_SLOTS; i++) {
-        ASSERT_TRUE(reply.messages[i].len > 0);
-        ASSERT_EQ_INT(reply.messages[i].data[0] >> 3, FROMRADIO_FIELD_CHANNEL);
-    }
-
-    for(size_t i = 12; i < 12 + PHONE_CONFIG_VARIANTS; i++) {
-        ASSERT_TRUE(reply.messages[i].len > 0);
-        ASSERT_EQ_INT(reply.messages[i].data[0] >> 3, FROMRADIO_FIELD_CONFIG);
-    }
-
-    for(size_t i = 22; i < 22 + PHONE_MODULECONFIG_VARIANTS; i++) {
-        ASSERT_TRUE(reply.messages[i].len > 0);
-        ASSERT_EQ_INT(reply.messages[i].data[0] >> 3, FROMRADIO_FIELD_MODULECONFIG);
-    }
+    ASSERT_TRUE(reply.messages[4].len > 0);
+    ASSERT_EQ_INT(reply.messages[4].data[0] >> 3, FROMRADIO_FIELD_CHANNEL);
+    ASSERT_TRUE(reply.messages[5].len > 0);
+    ASSERT_EQ_INT(reply.messages[5].data[0] >> 3, FROMRADIO_FIELD_CONFIG);
 
     /* config_complete_id last. PhoneAPI.cpp calls it the sentinel: it ends the
      * stage, so anything after it is a truncated sequence to the client. */
     ASSERT_TRUE(has_varint_field(
-        reply.messages[35].data,
-        reply.messages[35].len,
+        reply.messages[6].data,
+        reply.messages[6].len,
         FROMRADIO_FIELD_CONFIG_COMPLETE_ID,
         &value));
     ASSERT_EQ_INT(value, PHONE_NONCE_CONFIG);
@@ -253,9 +239,9 @@ TEST(test_stages_may_repeat) {
 
     handshake_init(&h, &id);
     ASSERT_TRUE(handshake_handle_to_radio(&h, to_radio, len, &reply));
-    ASSERT_EQ_INT(reply.count, 36);
+    ASSERT_EQ_INT(reply.count, 7);
     ASSERT_TRUE(handshake_handle_to_radio(&h, to_radio, len, &reply));
-    ASSERT_EQ_INT(reply.count, 36);
+    ASSERT_EQ_INT(reply.count, 7);
 }
 
 TEST(test_tolerates_null) {
