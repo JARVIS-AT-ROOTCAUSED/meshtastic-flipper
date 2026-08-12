@@ -4,6 +4,7 @@
 #include <furi_hal_version.h>
 #include <stdio.h>
 #include <string.h>
+#include <storage/storage.h>
 
 #include "src/proto/mesh_channel.h"
 #include "src/model/mesh_event.h"
@@ -27,10 +28,94 @@
 #define NODEINFO_FIRST_DELAY_MS  1000
 #define NODEINFO_LEARN_DELAY_MS  5000
 #define NODEINFO_INTERVAL_MS     (60UL * 60UL * 1000UL)
+#define ROSTER_CACHE_PATH        APP_DATA_PATH("node_roster.bin")
+#define ROSTER_CACHE_MAGIC       0x4D525331UL /* MRS1 */
+#define ROSTER_CACHE_VERSION     1
 
 static void input_callback(InputEvent* event, void* context) {
     FuriMessageQueue* queue = context;
     furi_message_queue_put(queue, event, FuriWaitForever);
+}
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t count;
+} RosterCacheHeader;
+
+static bool write_all(File* file, const void* data, size_t len) {
+    return storage_file_write(file, data, len) == len;
+}
+
+static bool read_all(File* file, void* data, size_t len) {
+    return storage_file_read(file, data, len) == len;
+}
+
+static void roster_cache_load(NodeRoster* roster) {
+    Storage* storage;
+    File* file;
+    RosterCacheHeader header;
+    NodeRoster loaded;
+
+    if(roster == NULL) return;
+
+    storage = furi_record_open(RECORD_STORAGE);
+    file = storage_file_alloc(storage);
+
+    if(!storage_file_open(file, ROSTER_CACHE_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
+        storage_file_close(file);
+        storage_file_free(file);
+        furi_record_close(RECORD_STORAGE);
+        return;
+    }
+
+    if(!read_all(file, &header, sizeof(header)) || header.magic != ROSTER_CACHE_MAGIC ||
+       header.version != ROSTER_CACHE_VERSION || header.count > NODE_ROSTER_CAPACITY) {
+        storage_file_close(file);
+        storage_file_free(file);
+        furi_record_close(RECORD_STORAGE);
+        return;
+    }
+
+    node_roster_init(&loaded);
+    loaded.count = header.count;
+    if(read_all(file, loaded.items, sizeof(MeshNode) * loaded.count)) {
+        for(size_t i = 0; i < loaded.count; i++) {
+            loaded.items[i].long_name[sizeof(loaded.items[i].long_name) - 1] = '\0';
+            loaded.items[i].short_name[sizeof(loaded.items[i].short_name) - 1] = '\0';
+        }
+        *roster = loaded;
+    }
+
+    storage_file_close(file);
+    storage_file_free(file);
+    furi_record_close(RECORD_STORAGE);
+}
+
+static void roster_cache_save(const NodeRoster* roster) {
+    Storage* storage;
+    File* file;
+    RosterCacheHeader header;
+
+    if(roster == NULL) return;
+
+    header.magic = ROSTER_CACHE_MAGIC;
+    header.version = ROSTER_CACHE_VERSION;
+    header.count = roster->count <= NODE_ROSTER_CAPACITY ? roster->count : NODE_ROSTER_CAPACITY;
+
+    storage = furi_record_open(RECORD_STORAGE);
+    file = storage_file_alloc(storage);
+
+    if(storage_file_open(file, ROSTER_CACHE_PATH, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+        if(write_all(file, &header, sizeof(header)) &&
+           write_all(file, roster->items, sizeof(MeshNode) * header.count)) {
+            storage_file_sync(file);
+        }
+    }
+
+    storage_file_close(file);
+    storage_file_free(file);
+    furi_record_close(RECORD_STORAGE);
 }
 
 static void node_identity_from_roster_node(const MeshNode* node, PhoneIdentity* out) {
@@ -477,6 +562,7 @@ MeshApp* mesh_app_alloc(void) {
     app->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     message_ring_init(&app->messages);
     node_roster_init(&app->roster);
+    roster_cache_load(&app->roster);
 
     app->page = PageHome;
     app->scroll = 0;
@@ -530,6 +616,8 @@ static void free_source(MeshApp* app) {
 
 void mesh_app_free(MeshApp* app) {
     if(app == NULL) return;
+
+    roster_cache_save(&app->roster);
 
     gui_remove_view_port(app->gui, app->view_port);
     furi_record_close(RECORD_GUI);
