@@ -91,7 +91,10 @@ static void phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t pack
         packet_id,
         from_radio,
         sizeof(from_radio));
-    if(len == 0 || !meshtastic_ble_service_queue(app->ble, from_radio, len)) {
+    /* Delivery ACKs are asynchronous from the phone's point of view. Like
+     * inbound mesh packets, they need to stay readable long enough for iOS to
+     * react to the FromNum doorbell. */
+    if(len == 0 || !meshtastic_ble_service_queue_linger(app->ble, from_radio, len)) {
         app->phone_bridge_dropped++;
     } else {
         app->phone_tx_acks++;
