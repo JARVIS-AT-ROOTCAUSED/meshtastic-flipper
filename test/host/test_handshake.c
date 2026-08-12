@@ -33,6 +33,19 @@ static size_t make_want_config(uint32_t nonce, uint8_t* buf, size_t cap) {
     return pb_writer_len(&w);
 }
 
+static size_t make_heartbeat(uint32_t nonce, uint8_t* buf, size_t cap) {
+    uint8_t heartbeat[16];
+    PbWriter w;
+
+    pb_writer_init(&w, heartbeat, sizeof(heartbeat));
+    pb_write_varint_field_always(&w, 1, nonce);
+    size_t heartbeat_len = pb_writer_len(&w);
+
+    pb_writer_init(&w, buf, cap);
+    pb_write_submessage(&w, TORADIO_FIELD_HEARTBEAT, heartbeat, heartbeat_len);
+    return pb_writer_len(&w);
+}
+
 /* Finds a top-level varint field. */
 static bool has_varint_field(const uint8_t* buf, size_t len, uint32_t want, uint64_t* out) {
     size_t pos = 0;
@@ -198,6 +211,36 @@ TEST(test_to_radio_without_want_config_is_ignored) {
     pb_write_varint_field_always(&w, TORADIO_FIELD_DISCONNECT, 1);
 
     ASSERT_TRUE(!handshake_handle_to_radio(&h, to_radio, pb_writer_len(&w), &reply));
+    ASSERT_EQ_INT(reply.count, 0);
+}
+
+TEST(test_heartbeat_gets_queue_status_reply) {
+    Handshake h;
+    MeshConfig id = identity();
+    HandshakeReply reply;
+    uint8_t to_radio[16];
+    uint32_t nonce = 0;
+    size_t len = make_heartbeat(1234, to_radio, sizeof(to_radio));
+
+    handshake_init(&h, &id);
+
+    ASSERT_TRUE(phone_decode_heartbeat_nonce(to_radio, len, &nonce));
+    ASSERT_EQ_INT(nonce, 1234);
+    ASSERT_TRUE(handshake_handle_to_radio(&h, to_radio, len, &reply));
+    ASSERT_EQ_INT(reply.count, 1);
+    ASSERT_EQ_INT(reply.messages[0].data[0] >> 3, FROMRADIO_FIELD_QUEUE_STATUS);
+}
+
+TEST(test_malformed_heartbeat_is_ignored) {
+    Handshake h;
+    MeshConfig id = identity();
+    HandshakeReply reply;
+    const uint8_t truncated[] = {0x3a, 0x02, 0x08};
+    uint32_t nonce = 0;
+
+    handshake_init(&h, &id);
+    ASSERT_TRUE(!phone_decode_heartbeat_nonce(truncated, sizeof(truncated), &nonce));
+    ASSERT_TRUE(!handshake_handle_to_radio(&h, truncated, sizeof(truncated), &reply));
     ASSERT_EQ_INT(reply.count, 0);
 }
 
@@ -441,6 +484,8 @@ RUN_TEST(test_stage_two_returns_node_info_then_config_complete);
 RUN_TEST(test_full_two_stage_sequence);
 RUN_TEST(test_unknown_nonce_is_rejected_and_sends_nothing);
 RUN_TEST(test_to_radio_without_want_config_is_ignored);
+RUN_TEST(test_heartbeat_gets_queue_status_reply);
+RUN_TEST(test_malformed_heartbeat_is_ignored);
 RUN_TEST(test_malformed_to_radio_is_ignored);
 RUN_TEST(test_reset_returns_to_idle);
 RUN_TEST(test_stages_may_repeat);

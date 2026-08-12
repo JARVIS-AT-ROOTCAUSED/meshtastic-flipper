@@ -54,12 +54,18 @@ Q:16 Dr:16 Now:0
 The cumulative count is higher than the nominal 9-message handshake because iOS
 may retry or send follow-up writes during the same session.
 
-## Firmware version claim
+## Firmware version claim and heartbeat
 
-The metadata firmware string is set to `2.5.18`, matching the iOS app's current
-hard minimum. Earlier builds reported `2.5.0`, which allowed the protocol stream
-to run but then failed the iOS version gate after database retrieval.
+The metadata firmware string is set to `2.7.4`. Earlier builds reported
+`2.5.0`, which allowed the protocol stream to run but then failed the iOS
+version gate after database retrieval. `2.5.18` satisfies the hard minimum, and
+`2.6.0` clears the iOS security warning.
 
-Do not raise this casually. iOS uses firmware version checks to expose newer
-feature paths. Claiming a modern `2.7.x` or `2.8.x` version should be paired
+The next important gate is `2.7.4`: iOS treats heartbeat writes as liveness
+checks and expects a `FromRadio.queueStatus` response. This branch decodes
+`ToRadio.heartbeat.nonce` and replies with `queueStatus`, echoing the nonce as
+`mesh_packet_id`.
+
+Do not raise this casually past `2.7.4`. iOS uses firmware version checks to
+expose newer feature paths. Claiming a modern `2.8.x` version should be paired
 with explicit support for the commands those paths send.

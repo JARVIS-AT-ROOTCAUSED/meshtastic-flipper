@@ -463,11 +463,11 @@ static void handle_to_radio(MeshtasticBleService* service, const uint8_t* data, 
         understood = true;
         FURI_LOG_I(TAG, "ToRadio want_config_id nonce=%lu", (unsigned long)nonce);
     } else if(len > 0 && (data[0] >> 3) == TORADIO_FIELD_HEARTBEAT) {
-        /* The settle heartbeat between stages. The firmware does not echo it,
-         * so sending nothing back is correct, and this line is here so a silent
-         * device can be told apart from a deaf one. */
+        /* Newer phone clients use heartbeat as a liveness probe. The handshake
+         * layer emits queueStatus; this early recognition only keeps logs
+         * readable when tracing the write path. */
         understood = true;
-        FURI_LOG_I(TAG, "ToRadio heartbeat, no reply expected");
+        FURI_LOG_I(TAG, "ToRadio heartbeat");
     }
 
     /* The first tag of the ToRadio message. ToRadio is a oneof, so this is what

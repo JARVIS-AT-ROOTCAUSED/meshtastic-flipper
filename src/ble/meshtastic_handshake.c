@@ -80,6 +80,16 @@ bool handshake_handle_to_radio(
         return push(reply, written);
     }
 
+    if(phone_decode_heartbeat_nonce(data, len, &nonce)) {
+        written = phone_encode_queue_status(
+            1,
+            1,
+            nonce,
+            reply->messages[reply->count].data,
+            HANDSHAKE_MAX_MESSAGE);
+        return push(reply, written);
+    }
+
     if(!phone_decode_want_config_id(data, len, &nonce)) return false;
 
     if(nonce == PHONE_NONCE_CONFIG) {

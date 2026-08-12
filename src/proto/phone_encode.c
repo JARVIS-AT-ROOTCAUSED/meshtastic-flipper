@@ -47,7 +47,7 @@
  * device is supported. It is a claim about protocol compatibility, not about
  * this being Meshtastic firmware, and it is deliberately a version whose phone
  * protocol this app actually implements. */
-#define PHONE_FIRMWARE_VERSION "2.6.10"
+#define PHONE_FIRMWARE_VERSION "2.7.4"
 
 /* device_state_version tracks the on-device database layout. The app only
  * compares it, so any stable value works; this one matches what the 2.5 series
@@ -149,6 +149,30 @@ size_t phone_encode_packet(
 
     pb_writer_init(&frame, out, out_len);
     pb_write_submessage(&frame, FROMRADIO_FIELD_PACKET, mesh_packet, packet_len);
+
+    return pb_writer_ok(&frame) ? pb_writer_len(&frame) : 0;
+}
+
+size_t phone_encode_queue_status(
+    uint32_t free_slots,
+    uint32_t max_slots,
+    uint32_t mesh_packet_id,
+    uint8_t* out,
+    size_t out_len) {
+    uint8_t inner[16];
+    PbWriter body;
+    PbWriter frame;
+
+    if(out == NULL) return 0;
+
+    pb_writer_init(&body, inner, sizeof(inner));
+    pb_write_varint_field(&body, 2, free_slots);
+    pb_write_varint_field(&body, 3, max_slots);
+    pb_write_varint_field(&body, 4, mesh_packet_id);
+    if(!pb_writer_ok(&body)) return 0;
+
+    pb_writer_init(&frame, out, out_len);
+    pb_write_submessage(&frame, FROMRADIO_FIELD_QUEUE_STATUS, inner, pb_writer_len(&body));
 
     return pb_writer_ok(&frame) ? pb_writer_len(&frame) : 0;
 }
@@ -290,6 +314,23 @@ bool phone_decode_admin_request(const uint8_t* buf, size_t len, PhoneAdminReques
 bool phone_decode_get_owner_request(const uint8_t* buf, size_t len, PhoneAdminRequest* out) {
     PhoneAdminReason ignored;
     return phone_decode_get_owner_request_why(buf, len, out, &ignored);
+}
+
+bool phone_decode_heartbeat_nonce(const uint8_t* buf, size_t len, uint32_t* nonce) {
+    const uint8_t* heartbeat = NULL;
+    size_t heartbeat_len = 0;
+    uint64_t value = 0;
+
+    if(nonce == NULL) return false;
+    *nonce = 0;
+
+    if(!scan_field(buf, len, TORADIO_FIELD_HEARTBEAT, &heartbeat, &heartbeat_len, NULL)) {
+        return false;
+    }
+    if(!scan_field(heartbeat, heartbeat_len, 1, NULL, NULL, &value)) return false;
+
+    *nonce = (uint32_t)value;
+    return true;
 }
 
 bool phone_decode_get_owner_request_why(

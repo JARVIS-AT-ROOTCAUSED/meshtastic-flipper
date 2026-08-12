@@ -39,6 +39,7 @@
 #define FROMRADIO_FIELD_CONFIG_COMPLETE_ID 7
 #define FROMRADIO_FIELD_MODULECONFIG       9
 #define FROMRADIO_FIELD_CHANNEL            10
+#define FROMRADIO_FIELD_QUEUE_STATUS       11
 #define FROMRADIO_FIELD_CONFIG             5
 #define FROMRADIO_FIELD_METADATA           13
 #define FROMRADIO_FIELD_DEVICEUI           17
@@ -180,6 +181,22 @@ size_t phone_encode_packet(
  * Returns false when the message is malformed or carries no want_config_id.
  * Other ToRadio fields are skipped by wire type. */
 bool phone_decode_want_config_id(const uint8_t* buf, size_t len, uint32_t* nonce);
+
+/* Read heartbeat.nonce out of a ToRadio heartbeat. Newer phone clients use the
+ * response as a liveness check, so a parsed heartbeat must be answered. */
+bool phone_decode_heartbeat_nonce(const uint8_t* buf, size_t len, uint32_t* nonce);
+
+/* FromRadio { queueStatus { free, maxlen, mesh_packet_id } }.
+ *
+ * The phone treats the top-level message as the heartbeat response. The queue
+ * counts are advisory here because this app does not expose the firmware's
+ * real LoRa packet queue. */
+size_t phone_encode_queue_status(
+    uint32_t free_slots,
+    uint32_t max_slots,
+    uint32_t mesh_packet_id,
+    uint8_t* out,
+    size_t out_len);
 
 /* Length of the session passkey. admin.proto documents 8 bytes. */
 #define PHONE_SESSION_PASSKEY_LEN 8
