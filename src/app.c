@@ -1,5 +1,6 @@
 #include "src/app.h"
 
+#include <furi_hal_random.h>
 #include <furi_hal_version.h>
 #include <string.h>
 
@@ -23,6 +24,70 @@
 static void input_callback(InputEvent* event, void* context) {
     FuriMessageQueue* queue = context;
     furi_message_queue_put(queue, event, FuriWaitForever);
+}
+
+static void phone_to_radio_callback(const uint8_t* data, size_t len, void* context) {
+    MeshApp* app = context;
+    PhoneTextMessage text;
+    AppTxMessage tx;
+
+    if(app == NULL || app->tx_queue == NULL) return;
+    if(!phone_decode_text_message(data, len, &text)) return;
+
+    if(text.text_len > mesh_encode_max_text_len() || text.text_len > sizeof(tx.text)) {
+        FURI_LOG_W("MeshApp", "phone text too large for LoRa frame");
+        return;
+    }
+
+    memset(&tx, 0, sizeof(tx));
+    tx.to = text.to;
+    tx.packet_id = text.packet_id;
+    tx.hop_limit = text.hop_limit;
+    tx.hop_start = text.hop_start;
+    tx.want_ack = text.want_ack;
+    tx.text_len = text.text_len;
+    memcpy(tx.text, text.text, text.text_len);
+
+    if(furi_message_queue_put(app->tx_queue, &tx, 0) != FuriStatusOk) {
+        FURI_LOG_W("MeshApp", "tx queue full");
+    }
+}
+
+static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
+    AppTxMessage tx;
+    uint8_t frame[RAW_FRAME_MAX];
+
+    while(furi_message_queue_get(app->tx_queue, &tx, 0) == FuriStatusOk) {
+        if(tx.packet_id == 0) {
+            furi_hal_random_fill_buf((uint8_t*)&tx.packet_id, sizeof(tx.packet_id));
+            if(tx.packet_id == 0) tx.packet_id = 1;
+        }
+
+        MeshTxParams params;
+        memset(&params, 0, sizeof(params));
+        params.to = tx.to == 0 ? 0xFFFFFFFFu : tx.to;
+        params.from = app->config.owner.node_num;
+        params.id = tx.packet_id;
+        params.hop_limit = tx.hop_limit == 0 ? 3 : tx.hop_limit;
+        params.hop_start = tx.hop_start == 0 ? params.hop_limit : tx.hop_start;
+        params.want_ack = tx.want_ack;
+        params.channel_hash = channel_hash;
+        params.key = key;
+        params.text = tx.text;
+        params.text_len = tx.text_len;
+
+        size_t frame_len = mesh_encode_frame(&params, frame, sizeof(frame));
+        if(frame_len == 0) {
+            FURI_LOG_W("MeshApp", "could not encode phone text");
+            continue;
+        }
+
+        if(app->source->transmit != NULL && app->source->transmit(app->source, frame, frame_len)) {
+            FURI_LOG_I("MeshApp", "sent phone text packet id=%lu", (unsigned long)params.id);
+        } else {
+            FURI_LOG_W("MeshApp", "radio transmit failed");
+        }
+    }
 }
 
 /* Answers the loader's exit request.
@@ -78,6 +143,8 @@ static int32_t radio_thread(void* context) {
     channel_hash = mesh_channel_hash(PRIMARY_CHANNEL_NAME, key, MESH_PSK_LEN);
 
     while(app->running) {
+        radio_drain_tx(app, key, channel_hash);
+
         if(!app->source->poll(app->source, &app->rx_frame, 250)) continue;
         if(!app->running) break;
 
@@ -165,9 +232,14 @@ MeshApp* mesh_app_alloc(void) {
     strncpy(app->node_name, app->config.owner.long_name, sizeof(app->node_name) - 1);
     /* Real devices show the last two bytes of the BLE MAC here. */
     snprintf(app->ble_id, sizeof(app->ble_id), "%02x%02x", mac[4], mac[5]);
-    app->ble = meshtastic_ble_start(&app->config);
 
     app->input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
+    app->tx_queue = furi_message_queue_alloc(4, sizeof(AppTxMessage));
+    app->ble = meshtastic_ble_start(&app->config);
+    if(app->ble != NULL) {
+        meshtastic_ble_service_set_callback(app->ble, phone_to_radio_callback, app);
+    }
+
     app->view_port = view_port_alloc();
     view_port_draw_callback_set(app->view_port, app_view_draw, app);
     view_port_input_callback_set(app->view_port, input_callback, app->input_queue);
@@ -193,6 +265,7 @@ void mesh_app_free(MeshApp* app) {
     furi_record_close(RECORD_GUI);
     view_port_free(app->view_port);
     furi_message_queue_free(app->input_queue);
+    furi_message_queue_free(app->tx_queue);
 
     if(app->ble) meshtastic_ble_stop(app->ble);
 

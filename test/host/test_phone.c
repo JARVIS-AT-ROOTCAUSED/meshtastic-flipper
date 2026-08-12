@@ -385,6 +385,37 @@ TEST(test_oversized_received_packet_is_not_forwarded) {
     ASSERT_EQ_INT(phone_encode_received_mesh_packet(&decoded, out, sizeof(out)), 0);
 }
 
+TEST(test_decode_phone_text_message) {
+    uint8_t data[64];
+    uint8_t packet[96];
+    uint8_t to_radio[128];
+    PbWriter w;
+    PhoneTextMessage text;
+    const uint8_t body[] = "hello mesh";
+
+    pb_writer_init(&w, data, sizeof(data));
+    pb_write_varint_field_always(&w, 1, MESH_PORTNUM_TEXT_MESSAGE_APP);
+    pb_write_bytes_field(&w, 2, body, sizeof(body) - 1);
+    size_t data_len = pb_writer_len(&w);
+
+    pb_writer_init(&w, packet, sizeof(packet));
+    pb_write_fixed32_field_always(&w, 2, 0xFFFFFFFFu);
+    pb_write_submessage(&w, 4, data, data_len);
+    pb_write_fixed32_field_always(&w, 6, 0x12345678u);
+    pb_write_varint_field(&w, 9, 5);
+    size_t packet_len = pb_writer_len(&w);
+
+    pb_writer_init(&w, to_radio, sizeof(to_radio));
+    pb_write_submessage(&w, TORADIO_FIELD_PACKET, packet, packet_len);
+
+    ASSERT_TRUE(phone_decode_text_message(to_radio, pb_writer_len(&w), &text));
+    ASSERT_EQ_INT(text.to, 0xFFFFFFFFu);
+    ASSERT_EQ_INT(text.packet_id, 0x12345678u);
+    ASSERT_EQ_INT(text.hop_limit, 5);
+    ASSERT_EQ_INT(text.text_len, sizeof(body) - 1);
+    ASSERT_EQ_MEM(text.text, body, sizeof(body) - 1);
+}
+
 /* ToRadio decode */
 
 TEST(test_decode_want_config_id) {
@@ -464,6 +495,7 @@ RUN_TEST(test_config_complete_with_zero_nonce_still_writes);
 RUN_TEST(test_packet_is_wrapped_in_field_2);
 RUN_TEST(test_received_radio_packet_is_forwarded_to_phone_shape);
 RUN_TEST(test_oversized_received_packet_is_not_forwarded);
+RUN_TEST(test_decode_phone_text_message);
 RUN_TEST(test_decode_want_config_id);
 RUN_TEST(test_decode_skips_other_fields);
 RUN_TEST(test_decode_reports_absent_want_config_id);

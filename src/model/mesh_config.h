@@ -56,8 +56,7 @@ typedef struct {
     uint8_t region;
     uint8_t modem_preset;
     uint32_t channel_num;
-    /* False on this build: there is no transmit path yet. Telling the phone
-     * otherwise invites it to queue messages that never leave. */
+    /* True once the text-message transmit path is wired to the SX1262 source. */
     bool tx_enabled;
 } MeshLoraConfig;
 

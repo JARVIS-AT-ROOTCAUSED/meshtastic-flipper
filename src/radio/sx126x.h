@@ -53,6 +53,7 @@ bool sx126x_read_register(Sx126x* radio, uint16_t address, uint8_t* value);
 /* Apply a LoRa configuration and enter continuous receive. */
 bool sx126x_configure_lora(Sx126x* radio, const LoraConfig* config);
 bool sx126x_start_rx(Sx126x* radio);
+bool sx126x_transmit(Sx126x* radio, const LoraConfig* config, const uint8_t* data, size_t len);
 
 /* Non-blocking. Returns true when a packet was read out.
  *

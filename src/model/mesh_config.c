@@ -46,7 +46,7 @@ void mesh_config_defaults(MeshConfig* out, uint32_t node_num) {
     out->lora.region = MESH_REGION_US;
     out->lora.modem_preset = MESH_PRESET_LONG_FAST;
     out->lora.channel_num = 20;
-    out->lora.tx_enabled = false;
+    out->lora.tx_enabled = true;
 }
 
 bool mesh_config_valid(const MeshConfig* config) {

@@ -245,6 +245,22 @@ typedef struct {
     bool want_response; /* Data.want_response */
 } PhoneAdminRequest;
 
+typedef struct {
+    uint32_t to;
+    uint32_t packet_id;
+    uint8_t hop_limit;
+    uint8_t hop_start;
+    bool want_ack;
+    const uint8_t* text;
+    size_t text_len;
+} PhoneTextMessage;
+
+/* Extract a ToRadio.packet carrying decoded Data.portnum TEXT_MESSAGE_APP.
+ *
+ * The returned text pointer aliases buf. The caller must copy it before the
+ * ToRadio buffer goes out of scope. */
+bool phone_decode_text_message(const uint8_t* buf, size_t len, PhoneTextMessage* out);
+
 /* Why an admin decode gave up.
  *
  * A bare false says a ToRadio was not a get_owner_request, which is true of

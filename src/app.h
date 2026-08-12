@@ -10,12 +10,13 @@
 #include <gui/gui.h>
 #include <input/input.h>
 
-#include "src/proto/mesh_decode.h"
 #include "src/model/mesh_config.h"
 #include "src/model/message_ring.h"
 #include "src/model/mesh_event.h"
 #include "src/model/node_roster.h"
 #include "src/ble/meshtastic_profile.h"
+#include "src/proto/mesh_decode.h"
+#include "src/proto/mesh_encode.h"
 #include "src/radio/frame_source.h"
 #include "src/radio/lora_config.h"
 
@@ -30,6 +31,18 @@ typedef enum {
     PagePhone,
     PageCount,
 } AppPage;
+
+#define APP_TX_TEXT_MAX 240
+
+typedef struct {
+    uint32_t to;
+    uint32_t packet_id;
+    uint8_t hop_limit;
+    uint8_t hop_start;
+    bool want_ack;
+    uint8_t text[APP_TX_TEXT_MAX];
+    size_t text_len;
+} AppTxMessage;
 
 typedef struct {
     FuriMutex* mutex;
@@ -70,6 +83,7 @@ typedef struct {
 
     FuriThread* thread;
     volatile bool running;
+    FuriMessageQueue* tx_queue;
 
     /* NULL when Bluetooth could not start. The app carries on without phone
      * support rather than refusing to run. */

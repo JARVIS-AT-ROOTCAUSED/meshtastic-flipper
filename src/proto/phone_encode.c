@@ -350,6 +350,52 @@ bool phone_decode_admin_request(const uint8_t* buf, size_t len, PhoneAdminReques
     return reason == PhoneAdminNotGetOwner && out->admin_field != 0;
 }
 
+bool phone_decode_text_message(const uint8_t* buf, size_t len, PhoneTextMessage* out) {
+    const uint8_t* packet = NULL;
+    const uint8_t* data = NULL;
+    const uint8_t* payload = NULL;
+    size_t packet_len = 0;
+    size_t data_len = 0;
+    size_t payload_len = 0;
+    uint64_t value = 0;
+
+    if(out == NULL) return false;
+    memset(out, 0, sizeof(*out));
+    out->to = 0xFFFFFFFFu;
+    out->hop_limit = 3;
+    out->hop_start = 3;
+
+    if(!scan_field(buf, len, TORADIO_FIELD_PACKET, &packet, &packet_len, NULL)) return false;
+    if(!scan_field(packet, packet_len, MESHPACKET_FIELD_DECODED, &data, &data_len, NULL))
+        return false;
+
+    if(!scan_field(data, data_len, DATA_FIELD_PORTNUM, NULL, NULL, &value)) return false;
+    if(value != MESH_PORTNUM_TEXT_MESSAGE_APP) return false;
+
+    if(!scan_field(data, data_len, DATA_FIELD_PAYLOAD, &payload, &payload_len, NULL)) return false;
+    if(payload_len == 0) return false;
+
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_TO, NULL, NULL, &value)) {
+        out->to = (uint32_t)value;
+    }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_ID, NULL, NULL, &value)) {
+        out->packet_id = (uint32_t)value;
+    }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_HOP_LIMIT, NULL, NULL, &value)) {
+        out->hop_limit = (uint8_t)value;
+    }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_HOP_START, NULL, NULL, &value)) {
+        out->hop_start = (uint8_t)value;
+    }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_WANT_ACK, NULL, NULL, &value)) {
+        out->want_ack = value != 0;
+    }
+
+    out->text = payload;
+    out->text_len = payload_len;
+    return true;
+}
+
 bool phone_decode_get_owner_request(const uint8_t* buf, size_t len, PhoneAdminRequest* out) {
     PhoneAdminReason ignored;
     return phone_decode_get_owner_request_why(buf, len, out, &ignored);
@@ -660,9 +706,7 @@ size_t phone_encode_lora_config(uint32_t channel_num, uint8_t* out, size_t out_l
     pb_write_varint_field_always(
         &lora_writer, LORA_FIELD_MODEM_PRESET, LORA_MODEM_PRESET_LONG_FAST);
     pb_write_varint_field_always(&lora_writer, LORA_FIELD_REGION, LORA_REGION_US);
-    /* Written as false on purpose. This build has no transmit path, and letting
-     * the app believe otherwise invites it to queue messages that never go out. */
-    pb_write_varint_field_always(&lora_writer, LORA_FIELD_TX_ENABLED, 0);
+    pb_write_varint_field_always(&lora_writer, LORA_FIELD_TX_ENABLED, 1);
     pb_write_varint_field(&lora_writer, LORA_FIELD_CHANNEL_NUM, channel_num);
     if(!pb_writer_ok(&lora_writer)) return 0;
 

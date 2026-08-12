@@ -27,12 +27,12 @@ TEST(test_defaults_are_us_longfast_on_the_default_channel) {
     ASSERT_EQ_INT(c.channel.psk_index, 1);
 }
 
-TEST(test_transmit_is_off_by_default) {
-    /* There is no transmit path yet. Telling the phone otherwise makes it queue
-     * messages that never leave. */
+TEST(test_text_transmit_is_enabled_by_default) {
+    /* Text messages written by the phone are now queued and sent by the SX1262
+     * source, so the phone should expose the send UI. */
     MeshConfig c;
     mesh_config_defaults(&c, TEST_NODE);
-    ASSERT_TRUE(!c.lora.tx_enabled);
+    ASSERT_TRUE(c.lora.tx_enabled);
 }
 
 TEST(test_default_name_distinguishes_two_devices) {
@@ -133,7 +133,7 @@ TEST(test_tolerates_null) {
 TEST_MAIN_BEGIN()
 RUN_TEST(test_defaults_are_valid);
 RUN_TEST(test_defaults_are_us_longfast_on_the_default_channel);
-RUN_TEST(test_transmit_is_off_by_default);
+RUN_TEST(test_text_transmit_is_enabled_by_default);
 RUN_TEST(test_default_name_distinguishes_two_devices);
 RUN_TEST(test_node_id_uses_the_meshtastic_form);
 RUN_TEST(test_long_name_is_truncated_not_rejected);

@@ -23,11 +23,15 @@ static const GpioPin* const pin_ant_sw = &gpio_usart_tx; /* PB6, header 13 */
 
 #define SPI_TIMEOUT_MS  1000
 #define BUSY_TIMEOUT_MS 100
+#define TX_TIMEOUT_MS   5000
 
 struct Sx126x {
     FuriHalSpiBusHandle spi;
     bool started;
 };
+
+static bool get_irq_status(Sx126x* radio, uint16_t* out);
+static bool clear_irq(Sx126x* radio, uint16_t mask);
 
 /* BUSY high means the chip is still digesting the previous command. Every
  * command has to wait for it to fall first. Datasheet 8.3. */
@@ -84,6 +88,26 @@ static bool
     deselect(radio);
 
     if(!ok) FURI_LOG_E(TAG, "SPI trx failed for opcode 0x%02x", tx[0]);
+    return ok;
+}
+
+static bool write_buffer(Sx126x* radio, uint8_t offset, const uint8_t* data, size_t len) {
+    uint8_t tx[2 + 255];
+
+    if(data == NULL || len > 255) return false;
+    if(!wait_not_busy()) return false;
+
+    tx[0] = SX126X_CMD_WRITE_BUFFER;
+    tx[1] = offset;
+    if(len > 0) memcpy(tx + 2, data, len);
+
+    select(radio);
+    furi_hal_spi_acquire(&radio->spi);
+    bool ok = furi_hal_spi_bus_tx(&radio->spi, tx, len + 2, SPI_TIMEOUT_MS);
+    furi_hal_spi_release(&radio->spi);
+    deselect(radio);
+
+    if(!ok) FURI_LOG_E(TAG, "SPI tx failed for WriteBuffer");
     return ok;
 }
 
@@ -302,6 +326,85 @@ bool sx126x_start_rx(Sx126x* radio) {
         (uint8_t)(SX126X_RX_CONTINUOUS),
     };
     return command(radio, rx, sizeof(rx));
+}
+
+bool sx126x_transmit(Sx126x* radio, const LoraConfig* config, const uint8_t* data, size_t len) {
+    if(radio == NULL || config == NULL || data == NULL || len == 0 || len > 255) return false;
+
+    uint8_t standby[2] = {SX126X_CMD_SET_STANDBY, SX126X_STANDBY_RC};
+    if(!command(radio, standby, sizeof(standby))) return false;
+
+    /* Conservative SX1262 PA setup. The board brings the PA_BOOST SX1262 out,
+     * so use the datasheet's high-power PA config and stay below the 22dBm
+     * chip limit rather than the region's 30dBm legal ceiling. */
+    uint8_t pa[5] = {SX126X_CMD_SET_PA_CONFIG, 0x04, 0x07, 0x00, 0x01};
+    if(!command(radio, pa, sizeof(pa))) return false;
+
+    uint8_t tx_params[3] = {SX126X_CMD_SET_TX_PARAMS, 0x16, 0x04};
+    if(!command(radio, tx_params, sizeof(tx_params))) return false;
+
+    uint8_t packet[7] = {
+        SX126X_CMD_SET_PACKET_PARAMS,
+        (uint8_t)(config->preamble_length >> 8),
+        (uint8_t)(config->preamble_length & 0xFF),
+        SX126X_LORA_HEADER_EXPLICIT,
+        (uint8_t)len,
+        SX126X_LORA_CRC_ON,
+        SX126X_LORA_IQ_STANDARD,
+    };
+    if(!command(radio, packet, sizeof(packet))) return false;
+
+    uint16_t irq_mask = SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT;
+    uint8_t irq[9] = {
+        SX126X_CMD_SET_DIO_IRQ_PARAMS,
+        (uint8_t)(irq_mask >> 8),
+        (uint8_t)(irq_mask & 0xFF),
+        (uint8_t)(irq_mask >> 8),
+        (uint8_t)(irq_mask & 0xFF),
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
+    if(!command(radio, irq, sizeof(irq))) return false;
+
+    uint8_t clear[3] = {
+        SX126X_CMD_CLEAR_IRQ_STATUS,
+        (uint8_t)(SX126X_IRQ_ALL >> 8),
+        (uint8_t)(SX126X_IRQ_ALL & 0xFF),
+    };
+    if(!command(radio, clear, sizeof(clear))) return false;
+
+    uint8_t base[3] = {SX126X_CMD_SET_BUFFER_BASE_ADDRESS, 0x00, 0x00};
+    if(!command(radio, base, sizeof(base))) return false;
+    if(!write_buffer(radio, 0x00, data, len)) return false;
+
+    uint8_t tx[4] = {SX126X_CMD_SET_TX, 0x00, 0x00, 0x00};
+    if(!command(radio, tx, sizeof(tx))) return false;
+
+    uint32_t waited = 0;
+    while(waited < TX_TIMEOUT_MS) {
+        uint16_t irq_status = 0;
+        if(get_irq_status(radio, &irq_status)) {
+            if(irq_status & SX126X_IRQ_TX_DONE) {
+                clear_irq(radio, SX126X_IRQ_ALL);
+                return sx126x_configure_lora(radio, config) && sx126x_start_rx(radio);
+            }
+            if(irq_status & SX126X_IRQ_TIMEOUT) {
+                clear_irq(radio, SX126X_IRQ_ALL);
+                sx126x_configure_lora(radio, config);
+                sx126x_start_rx(radio);
+                return false;
+            }
+        }
+        furi_delay_ms(5);
+        waited += 5;
+    }
+
+    clear_irq(radio, SX126X_IRQ_ALL);
+    sx126x_configure_lora(radio, config);
+    sx126x_start_rx(radio);
+    return false;
 }
 
 static bool get_irq_status(Sx126x* radio, uint16_t* out) {

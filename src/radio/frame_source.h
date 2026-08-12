@@ -42,6 +42,10 @@ struct FrameSource {
      * Returning false is normal and just means nothing arrived. */
     bool (*poll)(FrameSource* self, RawFrame* out, uint32_t timeout_ms);
 
+    /* Sends one already encoded Meshtastic LoRa frame. Implementations should
+     * return to receive mode before returning. */
+    bool (*transmit)(FrameSource* self, const uint8_t* data, size_t len);
+
     void* ctx;
 };
 

@@ -89,6 +89,12 @@ static bool radio_poll(FrameSource* self, RawFrame* out, uint32_t timeout_ms) {
     return false;
 }
 
+static bool radio_transmit(FrameSource* self, const uint8_t* data, size_t len) {
+    RadioContext* ctx = self->ctx;
+    if(!ctx->running) return false;
+    return sx126x_transmit(ctx->radio, &ctx->config, data, len);
+}
+
 FrameSource* source_radio_alloc(void) {
     FrameSource* source = malloc(sizeof(FrameSource));
     RadioContext* ctx = malloc(sizeof(RadioContext));
@@ -100,6 +106,7 @@ FrameSource* source_radio_alloc(void) {
     source->start = radio_start;
     source->stop = radio_stop;
     source->poll = radio_poll;
+    source->transmit = radio_transmit;
     source->ctx = ctx;
     return source;
 }
