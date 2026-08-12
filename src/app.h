@@ -35,6 +35,7 @@ typedef enum {
 #define APP_TX_TEXT_MAX 240
 
 typedef struct {
+    uint32_t from;
     uint32_t to;
     uint32_t packet_id;
     uint8_t hop_limit;

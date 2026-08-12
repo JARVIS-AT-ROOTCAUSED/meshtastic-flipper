@@ -246,6 +246,7 @@ typedef struct {
 } PhoneAdminRequest;
 
 typedef struct {
+    uint32_t from;
     uint32_t to;
     uint32_t packet_id;
     uint8_t hop_limit;
@@ -318,6 +319,17 @@ size_t phone_encode_admin_reply(
     const PhoneIdentity* id,
     const PhoneAdminRequest* request,
     const uint8_t* passkey,
+    uint8_t* out,
+    size_t out_len);
+
+/* FromRadio { packet { decoded { portnum: ROUTING_APP, request_id } } }.
+ *
+ * A Routing message with no error_reason is ACK/NONE in protobuf3 encoding.
+ * The phone correlates it to an outbound send by Data.request_id. */
+size_t phone_encode_routing_ack(
+    const PhoneIdentity* id,
+    uint32_t to,
+    uint32_t request_id,
     uint8_t* out,
     size_t out_len);
 

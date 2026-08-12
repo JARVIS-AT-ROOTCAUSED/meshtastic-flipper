@@ -416,6 +416,7 @@ TEST(test_decode_phone_text_message) {
     size_t data_len = pb_writer_len(&w);
 
     pb_writer_init(&w, packet, sizeof(packet));
+    pb_write_fixed32_field_always(&w, 1, 0x55667788u);
     pb_write_fixed32_field_always(&w, 2, 0xFFFFFFFFu);
     pb_write_submessage(&w, 4, data, data_len);
     pb_write_fixed32_field_always(&w, 6, 0x12345678u);
@@ -426,11 +427,38 @@ TEST(test_decode_phone_text_message) {
     pb_write_submessage(&w, TORADIO_FIELD_PACKET, packet, packet_len);
 
     ASSERT_TRUE(phone_decode_text_message(to_radio, pb_writer_len(&w), &text));
+    ASSERT_EQ_INT(text.from, 0x55667788u);
     ASSERT_EQ_INT(text.to, 0xFFFFFFFFu);
     ASSERT_EQ_INT(text.packet_id, 0x12345678u);
     ASSERT_EQ_INT(text.hop_limit, 5);
     ASSERT_EQ_INT(text.text_len, sizeof(body) - 1);
     ASSERT_EQ_MEM(text.text, body, sizeof(body) - 1);
+}
+
+TEST(test_routing_ack_references_original_packet) {
+    PhoneIdentity id = identity();
+    uint8_t out[128];
+    const uint8_t* packet = NULL;
+    const uint8_t* data = NULL;
+    size_t packet_len = 0;
+    size_t data_len = 0;
+    uint32_t fixed = 0;
+    uint64_t value = 0;
+
+    size_t len = phone_encode_routing_ack(&id, 0x55667788u, 0x12345678u, out, sizeof(out));
+    ASSERT_TRUE(len > 0);
+    ASSERT_TRUE(find_field(out, len, FROMRADIO_FIELD_PACKET, NULL, &packet, &packet_len));
+    ASSERT_TRUE(find_fixed32_field(packet, packet_len, 1, &fixed));
+    ASSERT_EQ_INT(fixed, id.node_num);
+    ASSERT_TRUE(find_fixed32_field(packet, packet_len, 2, &fixed));
+    ASSERT_EQ_INT(fixed, 0x55667788u);
+    ASSERT_TRUE(find_fixed32_field(packet, packet_len, 6, &fixed));
+    ASSERT_EQ_INT(fixed, 0x12345678u);
+    ASSERT_TRUE(find_field(packet, packet_len, 4, NULL, &data, &data_len));
+    ASSERT_TRUE(find_field(data, data_len, 1, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, PORTNUM_ROUTING_APP);
+    ASSERT_TRUE(find_fixed32_field(data, data_len, 6, &fixed));
+    ASSERT_EQ_INT(fixed, 0x12345678u);
 }
 
 /* ToRadio decode */
@@ -514,6 +542,7 @@ RUN_TEST(test_received_radio_packet_is_forwarded_to_phone_shape);
 RUN_TEST(test_oversized_received_packet_is_not_forwarded);
 RUN_TEST(test_queue_status_reports_mesh_packet_id);
 RUN_TEST(test_decode_phone_text_message);
+RUN_TEST(test_routing_ack_references_original_packet);
 RUN_TEST(test_decode_want_config_id);
 RUN_TEST(test_decode_skips_other_fields);
 RUN_TEST(test_decode_reports_absent_want_config_id);

@@ -43,6 +43,7 @@ static void phone_to_radio_callback(const uint8_t* data, size_t len, void* conte
     }
 
     memset(&tx, 0, sizeof(tx));
+    tx.from = text.from;
     tx.to = text.to;
     tx.packet_id = text.packet_id;
     tx.hop_limit = text.hop_limit;
@@ -73,6 +74,29 @@ static void phone_report_tx_done(MeshApp* app, uint32_t packet_id) {
     }
 }
 
+static void phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id) {
+    PhoneIdentity id;
+    uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
+    size_t len;
+
+    if(app == NULL || app->ble == NULL || packet_id == 0) return;
+
+    phone_identity_from_config(&app->config, &id);
+    len = phone_encode_routing_ack(
+        &id,
+        phone_node == 0 ? app->config.owner.node_num : phone_node,
+        packet_id,
+        from_radio,
+        sizeof(from_radio));
+    if(len == 0 || !meshtastic_ble_service_queue(app->ble, from_radio, len)) {
+        app->phone_bridge_dropped++;
+    }
+}
+
+static bool is_broadcast_node(uint32_t node_num) {
+    return node_num == 0 || node_num == 0xFFFFFFFFu;
+}
+
 static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
     AppTxMessage tx;
     uint8_t frame[RAW_FRAME_MAX];
@@ -90,7 +114,10 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
         params.id = tx.packet_id;
         params.hop_limit = tx.hop_limit == 0 ? 3 : tx.hop_limit;
         params.hop_start = tx.hop_start == 0 ? params.hop_limit : tx.hop_start;
-        params.want_ack = tx.want_ack;
+        /* Meshtastic firmware suppresses want_ack on broadcast packets to
+         * avoid ACK storms. The phone still needs a local routing success when
+         * the packet leaves the radio queue. */
+        params.want_ack = tx.want_ack && !is_broadcast_node(params.to);
         params.channel_hash = channel_hash;
         params.key = key;
         params.text = tx.text;
@@ -105,6 +132,7 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
         if(app->source->transmit != NULL && app->source->transmit(app->source, frame, frame_len)) {
             app->tx_sent++;
             phone_report_tx_done(app, params.id);
+            phone_report_tx_ack(app, tx.from, params.id);
             FURI_LOG_I("MeshApp", "sent phone text packet id=%lu", (unsigned long)params.id);
         } else {
             app->tx_failed++;

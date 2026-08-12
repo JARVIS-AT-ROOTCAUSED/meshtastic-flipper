@@ -378,6 +378,9 @@ bool phone_decode_text_message(const uint8_t* buf, size_t len, PhoneTextMessage*
     if(scan_field(packet, packet_len, MESHPACKET_FIELD_TO, NULL, NULL, &value)) {
         out->to = (uint32_t)value;
     }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_FROM, NULL, NULL, &value)) {
+        out->from = (uint32_t)value;
+    }
     if(scan_field(packet, packet_len, MESHPACKET_FIELD_ID, NULL, NULL, &value)) {
         out->packet_id = (uint32_t)value;
     }
@@ -851,6 +854,34 @@ size_t phone_encode_admin_reply(
     if(!pb_writer_ok(&w)) return 0;
 
     return wrap_admin_packet(id, request, data, pb_writer_len(&w), out, out_len);
+}
+
+size_t phone_encode_routing_ack(
+    const PhoneIdentity* id,
+    uint32_t to,
+    uint32_t request_id,
+    uint8_t* out,
+    size_t out_len) {
+    uint8_t data[32];
+    uint8_t packet[96];
+    PbWriter w;
+
+    if(id == NULL || out == NULL || request_id == 0) return 0;
+
+    pb_writer_init(&w, data, sizeof(data));
+    pb_write_varint_field_always(&w, DATA_FIELD_PORTNUM, PORTNUM_ROUTING_APP);
+    pb_write_fixed32_field(&w, DATA_FIELD_REQUEST_ID, request_id);
+    if(!pb_writer_ok(&w)) return 0;
+    size_t data_len = pb_writer_len(&w);
+
+    pb_writer_init(&w, packet, sizeof(packet));
+    pb_write_fixed32_field_always(&w, MESHPACKET_FIELD_FROM, id->node_num);
+    pb_write_fixed32_field(&w, MESHPACKET_FIELD_TO, to);
+    pb_write_submessage(&w, MESHPACKET_FIELD_DECODED, data, data_len);
+    pb_write_fixed32_field(&w, MESHPACKET_FIELD_ID, request_id);
+    if(!pb_writer_ok(&w)) return 0;
+
+    return phone_encode_packet(packet, pb_writer_len(&w), out, out_len);
 }
 
 void phone_identity_from_config(const MeshConfig* config, PhoneIdentity* out) {
