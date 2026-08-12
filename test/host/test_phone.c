@@ -447,7 +447,8 @@ TEST(test_routing_ack_references_original_packet) {
     uint32_t fixed = 0;
     uint64_t value = 0;
 
-    size_t len = phone_encode_routing_ack(&id, 0x55667788u, 0x12345678u, out, sizeof(out));
+    size_t len =
+        phone_encode_routing_ack(&id, 0x55667788u, 0x12345678u, 0x28u, out, sizeof(out));
     ASSERT_TRUE(len > 0);
     ASSERT_TRUE(find_field(out, len, FROMRADIO_FIELD_PACKET, NULL, &packet, &packet_len));
     ASSERT_TRUE(find_fixed32_field(packet, packet_len, 1, &fixed));
@@ -456,6 +457,8 @@ TEST(test_routing_ack_references_original_packet) {
     ASSERT_EQ_INT(fixed, 0x55667788u);
     ASSERT_TRUE(find_fixed32_field(packet, packet_len, 6, &fixed));
     ASSERT_EQ_INT(fixed, 0x12345678u);
+    ASSERT_TRUE(find_field(packet, packet_len, 19, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 0x28u);
     ASSERT_TRUE(find_field(packet, packet_len, 4, NULL, &data, &data_len));
     ASSERT_TRUE(find_field(data, data_len, 1, &value, NULL, NULL));
     ASSERT_EQ_INT(value, PORTNUM_ROUTING_APP);

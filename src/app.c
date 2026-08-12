@@ -20,9 +20,6 @@
 /* Matches the BLE notification queue entry size. Larger received mesh packets
  * are dropped until the BLE queue grows long-message support. */
 #define PHONE_BRIDGE_MESSAGE_MAX 192
-#define PHONE_ACK_DELAY_MS       750
-#define PHONE_ACK_REPEAT_MS      1250
-#define PHONE_ACK_REPEATS        3
 
 static void input_callback(InputEvent* event, void* context) {
     FuriMessageQueue* queue = context;
@@ -77,7 +74,8 @@ static void phone_report_tx_done(MeshApp* app, uint32_t packet_id) {
     }
 }
 
-static void phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id) {
+static void
+    phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id, uint32_t relay_node) {
     PhoneIdentity id;
     uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
     size_t len;
@@ -89,6 +87,7 @@ static void phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t pack
         &id,
         phone_node == 0 ? app->config.owner.node_num : phone_node,
         packet_id,
+        relay_node,
         from_radio,
         sizeof(from_radio));
     /* Delivery ACKs are asynchronous from the phone's point of view. Like
@@ -103,51 +102,6 @@ static void phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t pack
 
 static bool is_broadcast_node(uint32_t node_num) {
     return node_num == 0 || node_num == 0xFFFFFFFFu;
-}
-
-static void phone_schedule_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id) {
-    AppPhoneAck* slot = NULL;
-
-    if(app == NULL || packet_id == 0) return;
-
-    for(size_t i = 0; i < APP_PHONE_ACK_DEPTH; i++) {
-        if(!app->phone_acks[i].active) {
-            slot = &app->phone_acks[i];
-            break;
-        }
-    }
-
-    if(slot == NULL) {
-        slot = &app->phone_acks[0];
-        app->phone_bridge_dropped++;
-    }
-
-    slot->active = true;
-    slot->phone_node = phone_node;
-    slot->packet_id = packet_id;
-    slot->due_tick = furi_get_tick() + furi_ms_to_ticks(PHONE_ACK_DELAY_MS);
-    slot->remaining = PHONE_ACK_REPEATS;
-}
-
-static void phone_drain_tx_acks(MeshApp* app) {
-    uint32_t now;
-
-    if(app == NULL) return;
-
-    now = furi_get_tick();
-    for(size_t i = 0; i < APP_PHONE_ACK_DEPTH; i++) {
-        AppPhoneAck* ack = &app->phone_acks[i];
-        if(!ack->active) continue;
-        if((int32_t)(now - ack->due_tick) < 0) continue;
-
-        phone_report_tx_ack(app, ack->phone_node, ack->packet_id);
-        if(ack->remaining > 0) ack->remaining--;
-        if(ack->remaining == 0) {
-            ack->active = false;
-        } else {
-            ack->due_tick = now + furi_ms_to_ticks(PHONE_ACK_REPEAT_MS);
-        }
-    }
 }
 
 static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
@@ -185,18 +139,26 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
         if(app->source->transmit != NULL && app->source->transmit(app->source, frame, frame_len)) {
             app->tx_sent++;
             phone_report_tx_done(app, params.id);
-            /* iOS creates the local MessageEntity, launches the BLE send task,
-             * then saves the row. A routing ACK delivered immediately can race
-             * that save and be discarded because request_id has no matching
-             * row yet. Real mesh ACKs naturally arrive later; synthetic local
-             * ACKs need the same grace period. */
-            phone_schedule_tx_ack(app, tx.from, params.id);
             FURI_LOG_I("MeshApp", "sent phone text packet id=%lu", (unsigned long)params.id);
         } else {
             app->tx_failed++;
             FURI_LOG_W("MeshApp", "radio transmit failed");
         }
     }
+}
+
+static void phone_ack_rebroadcasted_send(MeshApp* app, const MeshDecoded* decoded) {
+    if(app == NULL || decoded == NULL) return;
+    if(decoded->header.id == 0 || decoded->header.relay_node == 0) return;
+    if(decoded->header.from != app->config.owner.node_num) return;
+
+    phone_report_tx_ack(
+        app, app->config.owner.node_num, decoded->header.id, decoded->header.relay_node);
+    FURI_LOG_I(
+        "MeshApp",
+        "acked rebroadcasted phone packet id=%lu relay=0x%02x",
+        (unsigned long)decoded->header.id,
+        decoded->header.relay_node);
 }
 
 /* Answers the loader's exit request.
@@ -253,7 +215,6 @@ static int32_t radio_thread(void* context) {
 
     while(app->running) {
         radio_drain_tx(app, key, channel_hash);
-        phone_drain_tx_acks(app);
 
         if(!app->source->poll(app->source, &app->rx_frame, 250)) continue;
         if(!app->running) break;
@@ -293,6 +254,7 @@ static int32_t radio_thread(void* context) {
 
         if(app->ble != NULL && (result == MESH_OK || result == MESH_ERR_NOT_TEXT)) {
             uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
+            if(result == MESH_OK) phone_ack_rebroadcasted_send(app, &app->rx_decoded);
             size_t from_radio_len =
                 phone_encode_received_mesh_packet(&app->rx_decoded, from_radio, sizeof(from_radio));
             if(from_radio_len > 0) {

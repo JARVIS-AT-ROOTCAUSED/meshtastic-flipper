@@ -865,6 +865,7 @@ size_t phone_encode_routing_ack(
     const PhoneIdentity* id,
     uint32_t to,
     uint32_t request_id,
+    uint32_t relay_node,
     uint8_t* out,
     size_t out_len) {
     uint8_t routing[8];
@@ -891,6 +892,7 @@ size_t phone_encode_routing_ack(
     pb_write_fixed32_field(&w, MESHPACKET_FIELD_TO, to);
     pb_write_submessage(&w, MESHPACKET_FIELD_DECODED, data, data_len);
     pb_write_fixed32_field(&w, MESHPACKET_FIELD_ID, request_id);
+    pb_write_varint_field(&w, MESHPACKET_FIELD_RELAY_NODE, relay_node);
     if(!pb_writer_ok(&w)) return 0;
 
     return phone_encode_packet(packet, pb_writer_len(&w), out, out_len);

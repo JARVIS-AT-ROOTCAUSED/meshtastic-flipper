@@ -322,14 +322,17 @@ size_t phone_encode_admin_reply(
     uint8_t* out,
     size_t out_len);
 
-/* FromRadio { packet { decoded { portnum: ROUTING_APP, request_id } } }.
+/* FromRadio { packet { decoded { portnum: ROUTING_APP, request_id },
+ * relay_node } }.
  *
  * A Routing message with no error_reason is ACK/NONE in protobuf3 encoding.
- * The phone correlates it to an outbound send by Data.request_id. */
+ * The phone correlates it to an outbound send by Data.request_id and shows the
+ * relay node when the ACK came from hearing a mesh rebroadcast. */
 size_t phone_encode_routing_ack(
     const PhoneIdentity* id,
     uint32_t to,
     uint32_t request_id,
+    uint32_t relay_node,
     uint8_t* out,
     size_t out_len);
 
