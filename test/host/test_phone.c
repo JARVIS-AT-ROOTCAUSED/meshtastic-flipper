@@ -440,8 +440,10 @@ TEST(test_routing_ack_references_original_packet) {
     uint8_t out[128];
     const uint8_t* packet = NULL;
     const uint8_t* data = NULL;
+    const uint8_t* routing = NULL;
     size_t packet_len = 0;
     size_t data_len = 0;
+    size_t routing_len = 0;
     uint32_t fixed = 0;
     uint64_t value = 0;
 
@@ -457,6 +459,9 @@ TEST(test_routing_ack_references_original_packet) {
     ASSERT_TRUE(find_field(packet, packet_len, 4, NULL, &data, &data_len));
     ASSERT_TRUE(find_field(data, data_len, 1, &value, NULL, NULL));
     ASSERT_EQ_INT(value, PORTNUM_ROUTING_APP);
+    ASSERT_TRUE(find_field(data, data_len, 2, NULL, &routing, &routing_len));
+    ASSERT_TRUE(find_field(routing, routing_len, 3, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 0);
     ASSERT_TRUE(find_fixed32_field(data, data_len, 6, &fixed));
     ASSERT_EQ_INT(fixed, 0x12345678u);
 }

@@ -41,6 +41,11 @@
 #define ADMIN_FIELD_GET_OWNER_RESPONSE 4
 #define ADMIN_FIELD_SESSION_PASSKEY    101
 
+/* mesh.proto Routing. error_reason is a oneof member: even ACK/NONE (0) must
+ * be explicitly present on the wire so clients know this is a routing ACK
+ * rather than an empty payload with no selected variant. */
+#define ROUTING_FIELD_ERROR_REASON 3
+
 #define NODEINFO_FIELD_USER 2
 
 /* mesh.proto, message DeviceMetadata. */
@@ -862,14 +867,21 @@ size_t phone_encode_routing_ack(
     uint32_t request_id,
     uint8_t* out,
     size_t out_len) {
+    uint8_t routing[8];
     uint8_t data[32];
     uint8_t packet[96];
     PbWriter w;
 
     if(id == NULL || out == NULL || request_id == 0) return 0;
 
+    pb_writer_init(&w, routing, sizeof(routing));
+    pb_write_varint_field_always(&w, ROUTING_FIELD_ERROR_REASON, 0);
+    if(!pb_writer_ok(&w)) return 0;
+    size_t routing_len = pb_writer_len(&w);
+
     pb_writer_init(&w, data, sizeof(data));
     pb_write_varint_field_always(&w, DATA_FIELD_PORTNUM, PORTNUM_ROUTING_APP);
+    pb_write_bytes_field(&w, DATA_FIELD_PAYLOAD, routing, routing_len);
     pb_write_fixed32_field(&w, DATA_FIELD_REQUEST_ID, request_id);
     if(!pb_writer_ok(&w)) return 0;
     size_t data_len = pb_writer_len(&w);
