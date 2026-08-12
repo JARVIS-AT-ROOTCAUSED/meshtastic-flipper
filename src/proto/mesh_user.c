@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "pb_write.h"
+
 #define WIRE_VARINT  0
 #define WIRE_FIXED64 1
 #define WIRE_LEN     2
@@ -101,4 +103,24 @@ bool mesh_user_parse(const uint8_t* buf, size_t len, MeshUser* out) {
     }
 
     return true;
+}
+
+size_t mesh_user_encode(
+    const char* id,
+    const char* long_name,
+    const char* short_name,
+    uint32_t hw_model,
+    uint8_t* out,
+    size_t out_len) {
+    PbWriter w;
+
+    if(out == NULL) return 0;
+
+    pb_writer_init(&w, out, out_len);
+    pb_write_string_field(&w, USER_FIELD_ID, id);
+    pb_write_string_field(&w, USER_FIELD_LONG_NAME, long_name);
+    pb_write_string_field(&w, USER_FIELD_SHORT_NAME, short_name);
+    pb_write_varint_field(&w, USER_FIELD_HW_MODEL, hw_model);
+
+    return pb_writer_ok(&w) ? pb_writer_len(&w) : 0;
 }

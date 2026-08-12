@@ -82,11 +82,7 @@ bool handshake_handle_to_radio(
 
     if(phone_decode_heartbeat_nonce(data, len, &nonce)) {
         written = phone_encode_queue_status(
-            1,
-            1,
-            nonce,
-            reply->messages[reply->count].data,
-            HANDSHAKE_MAX_MESSAGE);
+            1, 1, nonce, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
         return push(reply, written);
     }
 
@@ -126,9 +122,7 @@ bool handshake_handle_to_radio(
         if(!push(reply, written)) return false;
 
         written = phone_encode_lora_config(
-            h->config.lora.channel_num,
-            reply->messages[reply->count].data,
-            HANDSHAKE_MAX_MESSAGE);
+            h->config.lora.channel_num, reply->messages[reply->count].data, HANDSHAKE_MAX_MESSAGE);
         if(!push(reply, written)) return false;
 
         written = phone_encode_config_complete(

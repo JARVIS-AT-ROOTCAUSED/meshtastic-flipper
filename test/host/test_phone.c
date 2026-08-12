@@ -78,7 +78,8 @@ static bool find_field(
     return false;
 }
 
-static bool find_fixed32_field(const uint8_t* buf, size_t len, uint32_t want_field, uint32_t* out) {
+static bool
+    find_fixed32_field(const uint8_t* buf, size_t len, uint32_t want_field, uint32_t* out) {
     Reader r = {buf, len, 0};
     while(r.pos < r.len) {
         uint64_t tag;
@@ -353,7 +354,8 @@ TEST(test_received_radio_packet_is_forwarded_to_phone_shape) {
     uint64_t value = 0;
 
     mesh_channel_expand_psk(1, key);
-    ASSERT_EQ_INT(mesh_decode_frame(VEC0_FRAME, VEC0_FRAME_LEN, key, VEC0_CHANNEL_HASH, &decoded), MESH_OK);
+    ASSERT_EQ_INT(
+        mesh_decode_frame(VEC0_FRAME, VEC0_FRAME_LEN, key, VEC0_CHANNEL_HASH, &decoded), MESH_OK);
 
     size_t len = phone_encode_received_mesh_packet(&decoded, out, sizeof(out));
     ASSERT_TRUE(len > 0);
@@ -381,7 +383,8 @@ TEST(test_oversized_received_packet_is_not_forwarded) {
     uint8_t out[192];
 
     mesh_channel_expand_psk(1, key);
-    ASSERT_EQ_INT(mesh_decode_frame(VEC2_FRAME, VEC2_FRAME_LEN, key, VEC2_CHANNEL_HASH, &decoded), MESH_OK);
+    ASSERT_EQ_INT(
+        mesh_decode_frame(VEC2_FRAME, VEC2_FRAME_LEN, key, VEC2_CHANNEL_HASH, &decoded), MESH_OK);
     ASSERT_EQ_INT(phone_encode_received_mesh_packet(&decoded, out, sizeof(out)), 0);
 }
 
@@ -447,8 +450,7 @@ TEST(test_routing_ack_references_original_packet) {
     uint32_t fixed = 0;
     uint64_t value = 0;
 
-    size_t len =
-        phone_encode_routing_ack(&id, 0x55667788u, 0x12345678u, 0x28u, out, sizeof(out));
+    size_t len = phone_encode_routing_ack(&id, 0x55667788u, 0x12345678u, 0x28u, out, sizeof(out));
     ASSERT_TRUE(len > 0);
     ASSERT_TRUE(find_field(out, len, FROMRADIO_FIELD_PACKET, NULL, &packet, &packet_len));
     ASSERT_TRUE(find_fixed32_field(packet, packet_len, 1, &fixed));

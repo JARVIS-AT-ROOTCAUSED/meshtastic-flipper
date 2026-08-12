@@ -184,10 +184,7 @@ size_t phone_encode_packet(
  * node". It intentionally forwards only frames whose Data protobuf parsed
  * successfully; encrypted bytes that did not decrypt or malformed packets stay
  * local to the diagnostics counters. */
-size_t phone_encode_received_mesh_packet(
-    const MeshDecoded* decoded,
-    uint8_t* out,
-    size_t out_len);
+size_t phone_encode_received_mesh_packet(const MeshDecoded* decoded, uint8_t* out, size_t out_len);
 
 /* Read want_config_id out of a ToRadio the app wrote.
  *

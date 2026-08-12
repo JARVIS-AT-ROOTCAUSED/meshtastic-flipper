@@ -134,10 +134,7 @@ TEST(test_stage_one_follows_the_firmware_order) {
     /* config_complete_id last. PhoneAPI.cpp calls it the sentinel: it ends the
      * stage, so anything after it is a truncated sequence to the client. */
     ASSERT_TRUE(has_varint_field(
-        reply.messages[6].data,
-        reply.messages[6].len,
-        FROMRADIO_FIELD_CONFIG_COMPLETE_ID,
-        &value));
+        reply.messages[6].data, reply.messages[6].len, FROMRADIO_FIELD_CONFIG_COMPLETE_ID, &value));
     ASSERT_EQ_INT(value, PHONE_NONCE_CONFIG);
 
     ASSERT_EQ_INT(handshake_stage(&h), HandshakeConfigRequested);

@@ -10,6 +10,7 @@
 #include "mesh_channel.h"
 #include "mesh_decode.h"
 #include "mesh_encode.h"
+#include "mesh_user.h"
 #include "vectors.h"
 
 static MeshTxParams vec0_params(const uint8_t* key) {
@@ -23,8 +24,9 @@ static MeshTxParams vec0_params(const uint8_t* key) {
     p.want_ack = false;
     p.channel_hash = VEC0_CHANNEL_HASH;
     p.key = key;
-    p.text = VEC0_TEXT;
-    p.text_len = VEC0_TEXT_LEN;
+    p.portnum = MESH_PORTNUM_TEXT_MESSAGE_APP;
+    p.payload = VEC0_TEXT;
+    p.payload_len = VEC0_TEXT_LEN;
     return p;
 }
 
@@ -146,8 +148,8 @@ TEST(test_encode_frame_matches_generator_for_long_text) {
     p.hop_limit = VEC2_HOP_LIMIT;
     p.hop_start = VEC2_HOP_START;
     p.channel_hash = VEC2_CHANNEL_HASH;
-    p.text = VEC2_TEXT;
-    p.text_len = VEC2_TEXT_LEN;
+    p.payload = VEC2_TEXT;
+    p.payload_len = VEC2_TEXT_LEN;
 
     size_t len = mesh_encode_frame(&p, buf, sizeof(buf));
     ASSERT_EQ_INT(len, VEC2_FRAME_LEN);
@@ -165,8 +167,8 @@ TEST(test_encode_frame_with_second_psk_matches_generator) {
     p.hop_limit = VEC3_HOP_LIMIT;
     p.hop_start = VEC3_HOP_START;
     p.channel_hash = VEC3_CHANNEL_HASH;
-    p.text = VEC3_TEXT;
-    p.text_len = VEC3_TEXT_LEN;
+    p.payload = VEC3_TEXT;
+    p.payload_len = VEC3_TEXT_LEN;
 
     size_t len = mesh_encode_frame(&p, buf, sizeof(buf));
     ASSERT_EQ_INT(len, VEC3_FRAME_LEN);
@@ -184,8 +186,8 @@ TEST(test_encode_then_decode_round_trip) {
 
     mesh_channel_expand_psk(1, key);
     MeshTxParams p = vec0_params(key);
-    p.text = (const uint8_t*)message;
-    p.text_len = strlen(message);
+    p.payload = (const uint8_t*)message;
+    p.payload_len = strlen(message);
 
     size_t len = mesh_encode_frame(&p, frame, sizeof(frame));
     ASSERT_TRUE(len > MESH_HEADER_LEN);
@@ -194,6 +196,33 @@ TEST(test_encode_then_decode_round_trip) {
     ASSERT_EQ_INT(decoded.header.from, VEC0_FROM_NODE);
     ASSERT_EQ_INT(decoded.data.payload_len, strlen(message));
     ASSERT_EQ_MEM(decoded.data.payload, message, strlen(message));
+}
+
+TEST(test_encode_nodeinfo_round_trip) {
+    uint8_t key[MESH_PSK_LEN];
+    uint8_t frame[MESH_MAX_PAYLOAD];
+    uint8_t user[96];
+    MeshDecoded decoded;
+    MeshUser parsed;
+
+    mesh_channel_expand_psk(1, key);
+    size_t user_len = mesh_user_encode("!11223344", "Flipper Mesh", "F123", 0, user, sizeof(user));
+    ASSERT_TRUE(user_len > 0);
+
+    MeshTxParams p = vec0_params(key);
+    p.portnum = MESH_PORTNUM_NODEINFO_APP;
+    p.payload = user;
+    p.payload_len = user_len;
+
+    size_t len = mesh_encode_frame(&p, frame, sizeof(frame));
+    ASSERT_TRUE(len > MESH_HEADER_LEN);
+
+    ASSERT_EQ_INT(mesh_decode_frame(frame, len, key, p.channel_hash, &decoded), MESH_OK);
+    ASSERT_EQ_INT(decoded.data.portnum, MESH_PORTNUM_NODEINFO_APP);
+    ASSERT_TRUE(mesh_user_parse(decoded.data.payload, decoded.data.payload_len, &parsed));
+    ASSERT_TRUE(strcmp(parsed.id, "!11223344") == 0);
+    ASSERT_TRUE(strcmp(parsed.long_name, "Flipper Mesh") == 0);
+    ASSERT_TRUE(strcmp(parsed.short_name, "F123") == 0);
 }
 
 TEST(test_round_trip_at_maximum_text_length) {
@@ -206,8 +235,8 @@ TEST(test_round_trip_at_maximum_text_length) {
     memset(text, 'A', max);
     mesh_channel_expand_psk(1, key);
     MeshTxParams p = vec0_params(key);
-    p.text = text;
-    p.text_len = max;
+    p.payload = text;
+    p.payload_len = max;
 
     size_t len = mesh_encode_frame(&p, frame, sizeof(frame));
     ASSERT_TRUE(len > 0);
@@ -227,8 +256,8 @@ TEST(test_encode_frame_refuses_oversized_text) {
     memset(text, 'A', sizeof(text));
     mesh_channel_expand_psk(1, key);
     MeshTxParams p = vec0_params(key);
-    p.text = text;
-    p.text_len = sizeof(text);
+    p.payload = text;
+    p.payload_len = sizeof(text);
 
     ASSERT_EQ_INT(mesh_encode_frame(&p, frame, sizeof(frame)), 0);
 }
@@ -283,6 +312,7 @@ RUN_TEST(test_encode_frame_reproduces_generator_byte_for_byte);
 RUN_TEST(test_encode_frame_matches_generator_for_long_text);
 RUN_TEST(test_encode_frame_with_second_psk_matches_generator);
 RUN_TEST(test_encode_then_decode_round_trip);
+RUN_TEST(test_encode_nodeinfo_round_trip);
 RUN_TEST(test_round_trip_at_maximum_text_length);
 RUN_TEST(test_encode_frame_refuses_oversized_text);
 RUN_TEST(test_encode_frame_rejects_null);

@@ -398,11 +398,8 @@ static void drain_step(MeshtasticBleService* service) {
     furi_mutex_release(service->mutex);
 }
 
-static bool queue_impl(
-    MeshtasticBleService* service,
-    const uint8_t* data,
-    size_t len,
-    bool linger) {
+static bool
+    queue_impl(MeshtasticBleService* service, const uint8_t* data, size_t len, bool linger) {
     if(service == NULL || data == NULL) return false;
     if(len == 0 || len > QUEUE_MESSAGE_MAX) return false;
 
@@ -552,9 +549,16 @@ static void handle_to_radio(MeshtasticBleService* service, const uint8_t* data, 
              * of, so it must never pass unremarked. */
             FURI_LOG_E(TAG, "queue full, reply %u of %u dropped", (unsigned)i, (unsigned)count);
         }
+
+        /* Real PhoneAPI sends own node_info, then the rest of the NodeDB, then
+         * config_complete for the node-info stage. The live roster belongs to
+         * the app, so the app injects those dynamic node_info replies here. */
+        if(nonce == PHONE_NONCE_NODE_INFO && i == 0 && service->callback) {
+            service->callback(data, len, service->callback_context);
+        }
     }
 
-    if(service->callback) {
+    if(!(nonce == PHONE_NONCE_NODE_INFO && count > 0) && service->callback) {
         service->callback(data, len, service->callback_context);
     }
 }

@@ -12,19 +12,19 @@
 #define MYNODEINFO_FIELD_PIO_ENV         13
 
 /* NodeInfo field numbers. mesh.proto, message NodeInfo. */
-#define NODEINFO_FIELD_NUM       1
+#define NODEINFO_FIELD_NUM                   1
 /* mesh.proto MeshPacket. from, to and id are fixed32, not varint. */
-#define MESHPACKET_FIELD_FROM    1
-#define MESHPACKET_FIELD_TO      2
-#define MESHPACKET_FIELD_CHANNEL 3
-#define MESHPACKET_FIELD_DECODED 4
-#define MESHPACKET_FIELD_ID      6
-#define MESHPACKET_FIELD_HOP_LIMIT 9
-#define MESHPACKET_FIELD_WANT_ACK 10
-#define MESHPACKET_FIELD_VIA_MQTT 14
-#define MESHPACKET_FIELD_HOP_START 15
-#define MESHPACKET_FIELD_NEXT_HOP 18
-#define MESHPACKET_FIELD_RELAY_NODE 19
+#define MESHPACKET_FIELD_FROM                1
+#define MESHPACKET_FIELD_TO                  2
+#define MESHPACKET_FIELD_CHANNEL             3
+#define MESHPACKET_FIELD_DECODED             4
+#define MESHPACKET_FIELD_ID                  6
+#define MESHPACKET_FIELD_HOP_LIMIT           9
+#define MESHPACKET_FIELD_WANT_ACK            10
+#define MESHPACKET_FIELD_VIA_MQTT            14
+#define MESHPACKET_FIELD_HOP_START           15
+#define MESHPACKET_FIELD_NEXT_HOP            18
+#define MESHPACKET_FIELD_RELAY_NODE          19
 #define MESHPACKET_FIELD_TRANSPORT_MECHANISM 21
 
 /* mesh.proto Data. dest, source and request_id are fixed32. */
@@ -166,10 +166,8 @@ size_t phone_encode_packet(
     return pb_writer_ok(&frame) ? pb_writer_len(&frame) : 0;
 }
 
-size_t phone_encode_received_mesh_packet(
-    const MeshDecoded* decoded,
-    uint8_t* out,
-    size_t out_len) {
+size_t
+    phone_encode_received_mesh_packet(const MeshDecoded* decoded, uint8_t* out, size_t out_len) {
     uint8_t packet[192];
     PbWriter w;
 

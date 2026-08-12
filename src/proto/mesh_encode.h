@@ -27,8 +27,9 @@ typedef struct {
     bool want_ack;
     uint8_t channel_hash;
     const uint8_t* key; /* MESH_PSK_LEN bytes */
-    const uint8_t* text;
-    size_t text_len;
+    uint32_t portnum;
+    const uint8_t* payload;
+    size_t payload_len;
 } MeshTxParams;
 
 /* Encode a Data protobuf carrying a text message.
@@ -56,9 +57,12 @@ size_t mesh_encode_header(const MeshTxParams* params, uint8_t* out, size_t out_l
  * ciphertext decrypts to garbage at the far end. */
 size_t mesh_encode_frame(const MeshTxParams* params, uint8_t* out, size_t out_len);
 
-/* Largest text that still fits in a frame, given the header and protobuf
+/* Largest Data payload that still fits in a frame, given the header and protobuf
  * overhead. Callers should use this rather than discovering the limit by
  * getting 0 back from mesh_encode_frame. */
+size_t mesh_encode_max_payload_len(void);
+
+/* Compatibility wrapper for the text path. */
 size_t mesh_encode_max_text_len(void);
 
 #endif

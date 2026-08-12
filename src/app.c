@@ -2,6 +2,7 @@
 
 #include <furi_hal_random.h>
 #include <furi_hal_version.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "src/proto/mesh_channel.h"
@@ -15,26 +16,87 @@
 /* The primary channel. Meshtastic's default channel has an empty name and the
  * preset name is used for the hash, so "LongFast" is the string that produces
  * the hash real nodes put in the header. Confirmed against Channels::getHash. */
-#define PRIMARY_CHANNEL_NAME "LongFast"
-#define PRIMARY_PSK_INDEX    1
+#define PRIMARY_CHANNEL_NAME     "LongFast"
+#define PRIMARY_PSK_INDEX        1
 /* Matches the BLE notification queue entry size. Larger received mesh packets
  * are dropped until the BLE queue grows long-message support. */
 #define PHONE_BRIDGE_MESSAGE_MAX 192
 #define PHONE_ACK_DELAY_MS       750
 #define PHONE_ACK_REPEAT_MS      1250
 #define PHONE_ACK_REPEATS        3
+#define NODEINFO_FIRST_DELAY_MS  1000
+#define NODEINFO_LEARN_DELAY_MS  5000
+#define NODEINFO_INTERVAL_MS     (60UL * 60UL * 1000UL)
 
 static void input_callback(InputEvent* event, void* context) {
     FuriMessageQueue* queue = context;
     furi_message_queue_put(queue, event, FuriWaitForever);
 }
 
+static void node_identity_from_roster_node(const MeshNode* node, PhoneIdentity* out) {
+    char long_name[PHONE_LONG_NAME_MAX];
+    char short_name[PHONE_SHORT_NAME_MAX];
+
+    if(node == NULL || out == NULL) return;
+
+    if(node->long_name[0]) {
+        strncpy(long_name, node->long_name, sizeof(long_name) - 1);
+        long_name[sizeof(long_name) - 1] = '\0';
+    } else {
+        snprintf(
+            long_name, sizeof(long_name), "Node %04lx", (unsigned long)(node->node_num & 0xFFFF));
+    }
+
+    if(node->short_name[0]) {
+        strncpy(short_name, node->short_name, sizeof(short_name) - 1);
+        short_name[sizeof(short_name) - 1] = '\0';
+    } else {
+        snprintf(
+            short_name, sizeof(short_name), "%04lx", (unsigned long)(node->node_num & 0xFFFF));
+    }
+
+    phone_identity_init(out, node->node_num, long_name, short_name);
+}
+
+static void phone_bridge_roster(MeshApp* app) {
+    MeshNode nodes[NODE_ROSTER_CAPACITY];
+    size_t count = 0;
+
+    if(app == NULL || app->ble == NULL) return;
+
+    furi_mutex_acquire(app->mutex, FuriWaitForever);
+    count = node_roster_count(&app->roster);
+    if(count > NODE_ROSTER_CAPACITY) count = NODE_ROSTER_CAPACITY;
+    for(size_t i = 0; i < count; i++) {
+        const MeshNode* node = node_roster_get(&app->roster, i);
+        if(node != NULL) nodes[i] = *node;
+    }
+    furi_mutex_release(app->mutex);
+
+    for(size_t i = 0; i < count; i++) {
+        if(nodes[i].node_num == 0 || nodes[i].node_num == app->config.owner.node_num) continue;
+
+        PhoneIdentity id;
+        uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
+        node_identity_from_roster_node(&nodes[i], &id);
+        size_t len = phone_encode_node_info(&id, from_radio, sizeof(from_radio));
+        if(len == 0 || !meshtastic_ble_service_queue(app->ble, from_radio, len)) {
+            app->phone_bridge_dropped++;
+        }
+    }
+}
+
 static void phone_to_radio_callback(const uint8_t* data, size_t len, void* context) {
     MeshApp* app = context;
     PhoneTextMessage text;
     AppTxMessage tx;
+    uint32_t nonce = 0;
 
     if(app == NULL || app->tx_queue == NULL) return;
+    if(phone_decode_want_config_id(data, len, &nonce) && nonce == PHONE_NONCE_NODE_INFO) {
+        phone_bridge_roster(app);
+        return;
+    }
     if(!phone_decode_text_message(data, len, &text)) return;
 
     app->phone_text_packets++;
@@ -77,8 +139,11 @@ static void phone_report_tx_done(MeshApp* app, uint32_t packet_id) {
     }
 }
 
-static void
-    phone_report_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id, uint32_t relay_node) {
+static void phone_report_tx_ack(
+    MeshApp* app,
+    uint32_t phone_node,
+    uint32_t packet_id,
+    uint32_t relay_node) {
     PhoneIdentity id;
     uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
     size_t len;
@@ -107,8 +172,11 @@ static bool is_broadcast_node(uint32_t node_num) {
     return node_num == 0 || node_num == 0xFFFFFFFFu;
 }
 
-static void
-    phone_schedule_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id, uint32_t relay_node) {
+static void phone_schedule_tx_ack(
+    MeshApp* app,
+    uint32_t phone_node,
+    uint32_t packet_id,
+    uint32_t relay_node) {
     AppPhoneAck* slot = NULL;
 
     if(app == NULL || packet_id == 0 || relay_node == 0) return;
@@ -157,14 +225,81 @@ static void phone_drain_tx_acks(MeshApp* app) {
     }
 }
 
+static uint32_t random_packet_id(void) {
+    uint32_t packet_id = 0;
+    furi_hal_random_fill_buf((uint8_t*)&packet_id, sizeof(packet_id));
+    return packet_id == 0 ? 1 : packet_id;
+}
+
+static bool radio_send_nodeinfo(
+    MeshApp* app,
+    const uint8_t key[MESH_PSK_LEN],
+    uint8_t channel_hash,
+    bool want_ack) {
+    PhoneIdentity id;
+    uint8_t user[96];
+    uint8_t frame[RAW_FRAME_MAX];
+
+    if(app == NULL || app->source == NULL) return false;
+
+    phone_identity_from_config(&app->config, &id);
+    size_t user_len =
+        mesh_user_encode(id.id, id.long_name, id.short_name, id.hw_model, user, sizeof(user));
+    if(user_len == 0) return false;
+
+    MeshTxParams params;
+    memset(&params, 0, sizeof(params));
+    params.to = 0xFFFFFFFFu;
+    params.from = app->config.owner.node_num;
+    params.id = random_packet_id();
+    params.hop_limit = 3;
+    params.hop_start = 3;
+    params.want_ack = want_ack;
+    params.channel_hash = channel_hash;
+    params.key = key;
+    params.portnum = MESH_PORTNUM_NODEINFO_APP;
+    params.payload = user;
+    params.payload_len = user_len;
+
+    size_t frame_len = mesh_encode_frame(&params, frame, sizeof(frame));
+    if(frame_len == 0) return false;
+
+    if(app->source->transmit != NULL && app->source->transmit(app->source, frame, frame_len)) {
+        app->nodeinfo_tx_sent++;
+        FURI_LOG_I("MeshApp", "sent nodeinfo id=%lu", (unsigned long)params.id);
+        return true;
+    }
+
+    app->tx_failed++;
+    FURI_LOG_W("MeshApp", "nodeinfo transmit failed");
+    return false;
+}
+
+static void radio_schedule_nodeinfo(MeshApp* app, uint32_t delay_ms) {
+    if(app == NULL) return;
+    app->nodeinfo_next_tick = furi_get_tick() + furi_ms_to_ticks(delay_ms);
+}
+
+static void
+    radio_maybe_send_nodeinfo(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
+    uint32_t now;
+
+    if(app == NULL || app->nodeinfo_next_tick == 0) return;
+
+    now = furi_get_tick();
+    if((int32_t)(now - app->nodeinfo_next_tick) < 0) return;
+
+    radio_send_nodeinfo(app, key, channel_hash, false);
+    app->nodeinfo_next_tick = now + furi_ms_to_ticks(NODEINFO_INTERVAL_MS);
+}
+
 static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
     AppTxMessage tx;
     uint8_t frame[RAW_FRAME_MAX];
 
     while(furi_message_queue_get(app->tx_queue, &tx, 0) == FuriStatusOk) {
         if(tx.packet_id == 0) {
-            furi_hal_random_fill_buf((uint8_t*)&tx.packet_id, sizeof(tx.packet_id));
-            if(tx.packet_id == 0) tx.packet_id = 1;
+            tx.packet_id = random_packet_id();
         }
 
         MeshTxParams params;
@@ -180,8 +315,9 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
         params.want_ack = tx.want_ack && !is_broadcast_node(params.to);
         params.channel_hash = channel_hash;
         params.key = key;
-        params.text = tx.text;
-        params.text_len = tx.text_len;
+        params.portnum = MESH_PORTNUM_TEXT_MESSAGE_APP;
+        params.payload = tx.text;
+        params.payload_len = tx.text_len;
 
         size_t frame_len = mesh_encode_frame(&params, frame, sizeof(frame));
         if(frame_len == 0) {
@@ -265,8 +401,10 @@ static int32_t radio_thread(void* context) {
 
     if(!mesh_channel_expand_psk(PRIMARY_PSK_INDEX, key)) return 0;
     channel_hash = mesh_channel_hash(PRIMARY_CHANNEL_NAME, key, MESH_PSK_LEN);
+    radio_schedule_nodeinfo(app, NODEINFO_FIRST_DELAY_MS);
 
     while(app->running) {
+        radio_maybe_send_nodeinfo(app, key, channel_hash);
         radio_drain_tx(app, key, channel_hash);
         phone_drain_tx_acks(app);
 
@@ -286,7 +424,7 @@ static int32_t radio_thread(void* context) {
         /* Both of these ignore what they should ignore, so no filtering here:
          * the ring drops non-text, the roster drops headerless frames. */
         message_ring_push(&app->messages, &app->rx_event);
-        node_roster_observe(&app->roster, &app->rx_event, furi_get_tick());
+        bool learned_node = node_roster_observe(&app->roster, &app->rx_event, furi_get_tick());
 
         /* NODEINFO_APP carries a User message. It is how the node list gets
          * real names instead of hex numbers. portnums.proto:57-61. */
@@ -306,10 +444,14 @@ static int32_t radio_thread(void* context) {
 
         furi_mutex_release(app->mutex);
 
+        if(learned_node) {
+            radio_schedule_nodeinfo(app, NODEINFO_LEARN_DELAY_MS);
+        }
+
         if(app->ble != NULL && (result == MESH_OK || result == MESH_ERR_NOT_TEXT)) {
             uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
-            size_t from_radio_len =
-                phone_encode_received_mesh_packet(&app->rx_decoded, from_radio, sizeof(from_radio));
+            size_t from_radio_len = phone_encode_received_mesh_packet(
+                &app->rx_decoded, from_radio, sizeof(from_radio));
             if(from_radio_len > 0) {
                 if(!meshtastic_ble_service_queue_linger(app->ble, from_radio, from_radio_len)) {
                     app->phone_bridge_dropped++;

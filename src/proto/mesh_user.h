@@ -39,4 +39,15 @@ typedef struct {
  * Returns false only on malformed protobuf. */
 bool mesh_user_parse(const uint8_t* buf, size_t len, MeshUser* out);
 
+/* Encode a bare User message, suitable as the payload of NODEINFO_APP.
+ *
+ * Returns bytes written, or 0 when the buffer is too small. */
+size_t mesh_user_encode(
+    const char* id,
+    const char* long_name,
+    const char* short_name,
+    uint32_t hw_model,
+    uint8_t* out,
+    size_t out_len);
+
 #endif

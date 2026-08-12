@@ -101,6 +101,8 @@ typedef struct {
     uint32_t tx_failed;
     uint32_t phone_bridge_dropped;
     uint32_t phone_tx_acks;
+    uint32_t nodeinfo_tx_sent;
+    uint32_t nodeinfo_next_tick;
     AppPhoneAck phone_acks[APP_PHONE_ACK_DEPTH];
 
     /* NULL when Bluetooth could not start. The app carries on without phone

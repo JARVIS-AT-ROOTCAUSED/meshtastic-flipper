@@ -102,7 +102,7 @@ size_t mesh_encode_header(const MeshTxParams* params, uint8_t* out, size_t out_l
     return MESH_HEADER_LEN;
 }
 
-size_t mesh_encode_max_text_len(void) {
+size_t mesh_encode_max_payload_len(void) {
     /* A frame is the 16 byte header plus the encrypted Data protobuf, and the
      * whole thing has to fit in MESH_MAX_PAYLOAD.
      *
@@ -112,21 +112,22 @@ size_t mesh_encode_max_text_len(void) {
     return MESH_MAX_PAYLOAD - MESH_HEADER_LEN - 5;
 }
 
+size_t mesh_encode_max_text_len(void) {
+    return mesh_encode_max_payload_len();
+}
+
 size_t mesh_encode_frame(const MeshTxParams* params, uint8_t* out, size_t out_len) {
     uint8_t plaintext[MESH_MAX_PAYLOAD];
     size_t plaintext_len;
     size_t total;
 
     if(params == NULL || out == NULL || params->key == NULL) return 0;
-    if(params->text == NULL && params->text_len > 0) return 0;
+    if(params->payload == NULL && params->payload_len > 0) return 0;
+    if(params->portnum == 0) return 0;
 
     plaintext_len = mesh_encode_data(
-        MESH_PORTNUM_TEXT_MESSAGE_APP,
-        params->text,
-        params->text_len,
-        plaintext,
-        sizeof(plaintext));
-    if(plaintext_len == 0 && params->text_len > 0) return 0;
+        params->portnum, params->payload, params->payload_len, plaintext, sizeof(plaintext));
+    if(plaintext_len == 0 && params->payload_len > 0) return 0;
 
     total = MESH_HEADER_LEN + plaintext_len;
     if(total > MESH_MAX_PAYLOAD) return 0;
