@@ -61,11 +61,14 @@ The metadata firmware string is set to `2.7.4`. Earlier builds reported
 version gate after database retrieval. `2.5.18` satisfies the hard minimum, and
 `2.6.0` clears the iOS security warning.
 
-The next important gate is `2.7.4`: iOS treats heartbeat writes as liveness
-checks and expects a `FromRadio.queueStatus` response. This branch decodes
+The next important gate is `2.7.4`: iOS documents heartbeat writes as liveness
+checks and expects a definite `FromRadio.queueStatus` response. BLE does not use
+the repeating idle heartbeat timer, but the connection flow still sends
+heartbeats before the config and database requests. This branch decodes
 `ToRadio.heartbeat.nonce` and replies with `queueStatus`, echoing the nonce as
 `mesh_packet_id`.
 
 Do not raise this casually past `2.7.4`. iOS uses firmware version checks to
 expose newer feature paths. Claiming a modern `2.8.x` version should be paired
-with explicit support for the commands those paths send.
+with explicit support for the commands those paths send, including the
+`FromRadio.region_presets` map and the newer TAK/status/discovery paths.
