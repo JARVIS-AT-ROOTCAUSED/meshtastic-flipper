@@ -362,10 +362,10 @@ static void draw_phone(Canvas* canvas, MeshApp* app) {
     snprintf(
         line,
         sizeof(line),
-        "Tx:%lu/%lu T%u D:%lu",
+        "Tx:%lu/%lu A:%lu D:%lu",
         (unsigned long)app->tx_sent,
         (unsigned long)app->phone_text_packets,
-        (unsigned)st.last_write_field,
+        (unsigned long)app->phone_tx_acks,
         (unsigned long)app->phone_bridge_dropped);
     canvas_draw_str(canvas, 2, BODY_TOP + 3 * ROW_H, line);
 }
