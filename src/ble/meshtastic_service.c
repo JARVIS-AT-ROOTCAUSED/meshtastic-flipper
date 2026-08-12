@@ -92,6 +92,7 @@ struct MeshtasticBleService {
      * drain_step. */
     bool drain_active;
     uint32_t drain_due_tick;
+    uint8_t live_publish_repeats;
 
     /* Whether the doorbell has been rung for the batch being drained. One
      * notification per batch is what the protocol wants: the client drains
@@ -350,6 +351,7 @@ static void publish_head(MeshtasticBleService* service, bool ring_doorbell) {
 static void drain_step(MeshtasticBleService* service) {
     bool had_message;
     bool ring;
+    bool hold_live_message = false;
 
     furi_mutex_acquire(service->mutex, FuriWaitForever);
     ring = !service->doorbell_rung && service->pending > 0;
@@ -360,14 +362,23 @@ static void drain_step(MeshtasticBleService* service) {
 
     furi_mutex_acquire(service->mutex, FuriWaitForever);
     had_message = service->pending > 0;
-    if(had_message) {
+    /* During the connection handshake the phone is already polling, so advance
+     * quickly. After the handshake, incoming LoRa packets are asynchronous:
+     * hold each value for a few worker ticks so the phone can react to the
+     * FromNum doorbell and read it before we publish empty. */
+    hold_live_message = had_message && handshake_is_complete(&service->handshake) &&
+                        service->live_publish_repeats < 3;
+    if(hold_live_message) {
+        service->live_publish_repeats++;
+    } else if(had_message) {
         service->tail = (service->tail + 1) % QUEUE_DEPTH;
         service->pending--;
         service->stat_drained++;
+        service->live_publish_repeats = 0;
     }
     /* Run one step past empty so the drained queue is published as a
      * zero-length read. That empty read is how the phone learns to stop. */
-    service->drain_active = had_message || service->pending > 0;
+    service->drain_active = hold_live_message || had_message || service->pending > 0;
     if(!service->drain_active) {
         FURI_LOG_I(
             TAG,
@@ -376,7 +387,10 @@ static void drain_step(MeshtasticBleService* service) {
             (unsigned long)service->stat_fail_radio);
     }
     /* Armed again for the next batch once this one is fully drained. */
-    if(!service->drain_active) service->doorbell_rung = false;
+    if(!service->drain_active) {
+        service->doorbell_rung = false;
+        service->live_publish_repeats = 0;
+    }
     furi_mutex_release(service->mutex);
 }
 

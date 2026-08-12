@@ -60,7 +60,7 @@
 /* device_state_version tracks the on-device database layout. The app only
  * compares it, so any stable value works; this one matches what the 2.5 series
  * reports. */
-#define PHONE_DEVICE_STATE_VERSION 23
+#define PHONE_DEVICE_STATE_VERSION 24
 
 /* User field numbers. mesh.proto, message User. Note that field 4 is retired,
  * so hw_model is 5 and not 4. */
