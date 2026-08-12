@@ -20,6 +20,9 @@
 /* Matches the BLE notification queue entry size. Larger received mesh packets
  * are dropped until the BLE queue grows long-message support. */
 #define PHONE_BRIDGE_MESSAGE_MAX 192
+#define PHONE_ACK_DELAY_MS       750
+#define PHONE_ACK_REPEAT_MS      1250
+#define PHONE_ACK_REPEATS        3
 
 static void input_callback(InputEvent* event, void* context) {
     FuriMessageQueue* queue = context;
@@ -104,6 +107,56 @@ static bool is_broadcast_node(uint32_t node_num) {
     return node_num == 0 || node_num == 0xFFFFFFFFu;
 }
 
+static void
+    phone_schedule_tx_ack(MeshApp* app, uint32_t phone_node, uint32_t packet_id, uint32_t relay_node) {
+    AppPhoneAck* slot = NULL;
+
+    if(app == NULL || packet_id == 0 || relay_node == 0) return;
+
+    for(size_t i = 0; i < APP_PHONE_ACK_DEPTH; i++) {
+        if(app->phone_acks[i].active && app->phone_acks[i].packet_id == packet_id) {
+            slot = &app->phone_acks[i];
+            break;
+        }
+        if(slot == NULL && !app->phone_acks[i].active) {
+            slot = &app->phone_acks[i];
+        }
+    }
+
+    if(slot == NULL) {
+        slot = &app->phone_acks[0];
+        app->phone_bridge_dropped++;
+    }
+
+    slot->active = true;
+    slot->phone_node = phone_node;
+    slot->packet_id = packet_id;
+    slot->relay_node = relay_node;
+    slot->due_tick = furi_get_tick() + furi_ms_to_ticks(PHONE_ACK_DELAY_MS);
+    slot->remaining = PHONE_ACK_REPEATS;
+}
+
+static void phone_drain_tx_acks(MeshApp* app) {
+    uint32_t now;
+
+    if(app == NULL) return;
+
+    now = furi_get_tick();
+    for(size_t i = 0; i < APP_PHONE_ACK_DEPTH; i++) {
+        AppPhoneAck* ack = &app->phone_acks[i];
+        if(!ack->active) continue;
+        if((int32_t)(now - ack->due_tick) < 0) continue;
+
+        phone_report_tx_ack(app, ack->phone_node, ack->packet_id, ack->relay_node);
+        if(ack->remaining > 0) ack->remaining--;
+        if(ack->remaining == 0) {
+            ack->active = false;
+        } else {
+            ack->due_tick = now + furi_ms_to_ticks(PHONE_ACK_REPEAT_MS);
+        }
+    }
+}
+
 static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
     AppTxMessage tx;
     uint8_t frame[RAW_FRAME_MAX];
@@ -152,11 +205,11 @@ static void phone_ack_rebroadcasted_send(MeshApp* app, const MeshDecoded* decode
     if(decoded->header.id == 0 || decoded->header.relay_node == 0) return;
     if(decoded->header.from != app->config.owner.node_num) return;
 
-    phone_report_tx_ack(
+    phone_schedule_tx_ack(
         app, app->config.owner.node_num, decoded->header.id, decoded->header.relay_node);
     FURI_LOG_I(
         "MeshApp",
-        "acked rebroadcasted phone packet id=%lu relay=0x%02x",
+        "scheduled rebroadcast ack id=%lu relay=0x%02x",
         (unsigned long)decoded->header.id,
         decoded->header.relay_node);
 }
@@ -215,6 +268,7 @@ static int32_t radio_thread(void* context) {
 
     while(app->running) {
         radio_drain_tx(app, key, channel_hash);
+        phone_drain_tx_acks(app);
 
         if(!app->source->poll(app->source, &app->rx_frame, 250)) continue;
         if(!app->running) break;
@@ -254,7 +308,6 @@ static int32_t radio_thread(void* context) {
 
         if(app->ble != NULL && (result == MESH_OK || result == MESH_ERR_NOT_TEXT)) {
             uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
-            if(result == MESH_OK) phone_ack_rebroadcasted_send(app, &app->rx_decoded);
             size_t from_radio_len =
                 phone_encode_received_mesh_packet(&app->rx_decoded, from_radio, sizeof(from_radio));
             if(from_radio_len > 0) {
@@ -266,6 +319,7 @@ static int32_t radio_thread(void* context) {
                 app->phone_bridge_dropped++;
                 FURI_LOG_D("MeshApp", "received packet too large for phone bridge");
             }
+            if(result == MESH_OK) phone_ack_rebroadcasted_send(app, &app->rx_decoded);
         }
 
         view_port_update(app->view_port);

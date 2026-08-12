@@ -45,6 +45,17 @@ typedef struct {
     size_t text_len;
 } AppTxMessage;
 
+#define APP_PHONE_ACK_DEPTH 4
+
+typedef struct {
+    bool active;
+    uint32_t phone_node;
+    uint32_t packet_id;
+    uint32_t relay_node;
+    uint32_t due_tick;
+    uint8_t remaining;
+} AppPhoneAck;
+
 typedef struct {
     FuriMutex* mutex;
 
@@ -90,6 +101,7 @@ typedef struct {
     uint32_t tx_failed;
     uint32_t phone_bridge_dropped;
     uint32_t phone_tx_acks;
+    AppPhoneAck phone_acks[APP_PHONE_ACK_DEPTH];
 
     /* NULL when Bluetooth could not start. The app carries on without phone
      * support rather than refusing to run. */
