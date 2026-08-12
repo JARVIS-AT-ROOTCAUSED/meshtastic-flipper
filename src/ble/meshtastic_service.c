@@ -62,6 +62,7 @@ _Static_assert(
 typedef struct {
     uint8_t data[QUEUE_MESSAGE_MAX];
     size_t len;
+    bool linger;
 } QueuedMessage;
 
 /* A ToRadio write, copied out of the BLE callback so the stack thread can
@@ -352,6 +353,7 @@ static void drain_step(MeshtasticBleService* service) {
     bool had_message;
     bool ring;
     bool hold_live_message = false;
+    bool should_linger = false;
 
     furi_mutex_acquire(service->mutex, FuriWaitForever);
     ring = !service->doorbell_rung && service->pending > 0;
@@ -363,10 +365,12 @@ static void drain_step(MeshtasticBleService* service) {
     furi_mutex_acquire(service->mutex, FuriWaitForever);
     had_message = service->pending > 0;
     /* During the connection handshake the phone is already polling, so advance
-     * quickly. After the handshake, incoming LoRa packets are asynchronous:
-     * hold each value for a few worker ticks so the phone can react to the
-     * FromNum doorbell and read it before we publish empty. */
-    hold_live_message = had_message && handshake_is_complete(&service->handshake) &&
+     * quickly. After the handshake, incoming LoRa packets are asynchronous and
+     * are marked linger by the app: hold only those values for a few worker
+     * ticks so the phone can react to the FromNum doorbell and read them before
+     * we publish empty. Control/status messages deliberately do not linger. */
+    if(had_message) should_linger = service->queue[service->tail].linger;
+    hold_live_message = should_linger && handshake_is_complete(&service->handshake) &&
                         service->live_publish_repeats < 3;
     if(hold_live_message) {
         service->live_publish_repeats++;
@@ -394,7 +398,11 @@ static void drain_step(MeshtasticBleService* service) {
     furi_mutex_release(service->mutex);
 }
 
-bool meshtastic_ble_service_queue(MeshtasticBleService* service, const uint8_t* data, size_t len) {
+static bool queue_impl(
+    MeshtasticBleService* service,
+    const uint8_t* data,
+    size_t len,
+    bool linger) {
     if(service == NULL || data == NULL) return false;
     if(len == 0 || len > QUEUE_MESSAGE_MAX) return false;
 
@@ -408,6 +416,7 @@ bool meshtastic_ble_service_queue(MeshtasticBleService* service, const uint8_t* 
     QueuedMessage* slot = &service->queue[service->head];
     memcpy(slot->data, data, len);
     slot->len = len;
+    slot->linger = linger;
     service->head = (service->head + 1) % QUEUE_DEPTH;
     service->pending++;
     service->stat_queued++;
@@ -420,6 +429,17 @@ bool meshtastic_ble_service_queue(MeshtasticBleService* service, const uint8_t* 
 
     furi_mutex_release(service->mutex);
     return true;
+}
+
+bool meshtastic_ble_service_queue(MeshtasticBleService* service, const uint8_t* data, size_t len) {
+    return queue_impl(service, data, len, false);
+}
+
+bool meshtastic_ble_service_queue_linger(
+    MeshtasticBleService* service,
+    const uint8_t* data,
+    size_t len) {
+    return queue_impl(service, data, len, true);
 }
 
 /* Non-blocking for the same reason as meshtastic_ble_service_stats: any UI

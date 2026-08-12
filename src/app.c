@@ -57,6 +57,22 @@ static void phone_to_radio_callback(const uint8_t* data, size_t len, void* conte
     }
 }
 
+static void phone_report_tx_done(MeshApp* app, uint32_t packet_id) {
+    uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
+    size_t len;
+
+    if(app == NULL || app->ble == NULL || packet_id == 0) return;
+
+    /* The phone keeps outgoing messages in "sending" until the radio reports
+     * queue progress for the matching MeshPacket id. LoRa delivery is still
+     * best-effort; this acknowledges that the packet left the Flipper's local
+     * queue and was handed to the radio. */
+    len = phone_encode_queue_status(1, 1, packet_id, from_radio, sizeof(from_radio));
+    if(len == 0 || !meshtastic_ble_service_queue(app->ble, from_radio, len)) {
+        app->phone_bridge_dropped++;
+    }
+}
+
 static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_t channel_hash) {
     AppTxMessage tx;
     uint8_t frame[RAW_FRAME_MAX];
@@ -88,6 +104,7 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
 
         if(app->source->transmit != NULL && app->source->transmit(app->source, frame, frame_len)) {
             app->tx_sent++;
+            phone_report_tx_done(app, params.id);
             FURI_LOG_I("MeshApp", "sent phone text packet id=%lu", (unsigned long)params.id);
         } else {
             app->tx_failed++;
@@ -192,7 +209,7 @@ static int32_t radio_thread(void* context) {
             size_t from_radio_len =
                 phone_encode_received_mesh_packet(&app->rx_decoded, from_radio, sizeof(from_radio));
             if(from_radio_len > 0) {
-                if(!meshtastic_ble_service_queue(app->ble, from_radio, from_radio_len)) {
+                if(!meshtastic_ble_service_queue_linger(app->ble, from_radio, from_radio_len)) {
                     app->phone_bridge_dropped++;
                     FURI_LOG_D("MeshApp", "phone bridge queue full");
                 }

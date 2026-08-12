@@ -385,6 +385,23 @@ TEST(test_oversized_received_packet_is_not_forwarded) {
     ASSERT_EQ_INT(phone_encode_received_mesh_packet(&decoded, out, sizeof(out)), 0);
 }
 
+TEST(test_queue_status_reports_mesh_packet_id) {
+    uint8_t buf[32];
+    const uint8_t* status = NULL;
+    size_t status_len = 0;
+    uint64_t value = 0;
+
+    size_t len = phone_encode_queue_status(1, 4, 0x12345678u, buf, sizeof(buf));
+    ASSERT_TRUE(len > 0);
+    ASSERT_TRUE(find_field(buf, len, FROMRADIO_FIELD_QUEUE_STATUS, NULL, &status, &status_len));
+    ASSERT_TRUE(find_field(status, status_len, 2, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 1);
+    ASSERT_TRUE(find_field(status, status_len, 3, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 4);
+    ASSERT_TRUE(find_field(status, status_len, 4, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 0x12345678u);
+}
+
 TEST(test_decode_phone_text_message) {
     uint8_t data[64];
     uint8_t packet[96];
@@ -495,6 +512,7 @@ RUN_TEST(test_config_complete_with_zero_nonce_still_writes);
 RUN_TEST(test_packet_is_wrapped_in_field_2);
 RUN_TEST(test_received_radio_packet_is_forwarded_to_phone_shape);
 RUN_TEST(test_oversized_received_packet_is_not_forwarded);
+RUN_TEST(test_queue_status_reports_mesh_packet_id);
 RUN_TEST(test_decode_phone_text_message);
 RUN_TEST(test_decode_want_config_id);
 RUN_TEST(test_decode_skips_other_fields);

@@ -39,6 +39,17 @@ void meshtastic_ble_service_set_callback(
  * radio thread, and the phone re-reads until empty anyway. */
 bool meshtastic_ble_service_queue(MeshtasticBleService* service, const uint8_t* data, size_t len);
 
+/* Queue a live FromRadio packet and hold it briefly while draining.
+ *
+ * The Flipper BLE stack does not expose per-read callbacks, so asynchronous
+ * LoRa packets can be published and retired before iOS reacts to the doorbell.
+ * Only live mesh packets need that grace period. Handshake, heartbeat and TX
+ * status messages must drain immediately so they behave like control replies. */
+bool meshtastic_ble_service_queue_linger(
+    MeshtasticBleService* service,
+    const uint8_t* data,
+    size_t len);
+
 /* Number of messages waiting. Exposed for the debug view. */
 size_t meshtastic_ble_service_pending(MeshtasticBleService* service);
 
