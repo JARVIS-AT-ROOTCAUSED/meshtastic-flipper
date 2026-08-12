@@ -47,7 +47,7 @@
  * device is supported. It is a claim about protocol compatibility, not about
  * this being Meshtastic firmware, and it is deliberately a version whose phone
  * protocol this app actually implements. */
-#define PHONE_FIRMWARE_VERSION "2.6.0"
+#define PHONE_FIRMWARE_VERSION "2.6.10"
 
 /* device_state_version tracks the on-device database layout. The app only
  * compares it, so any stable value works; this one matches what the 2.5 series
