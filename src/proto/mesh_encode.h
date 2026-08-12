@@ -30,7 +30,19 @@ typedef struct {
     uint32_t portnum;
     const uint8_t* payload;
     size_t payload_len;
+    uint32_t data_dest;
+    uint32_t data_source;
+    uint32_t data_request_id;
 } MeshTxParams;
+
+typedef struct {
+    uint32_t portnum;
+    const uint8_t* payload;
+    size_t payload_len;
+    uint32_t dest;
+    uint32_t source;
+    uint32_t request_id;
+} MeshDataEncodeParams;
 
 /* Encode a Data protobuf carrying a text message.
  *
@@ -47,6 +59,8 @@ size_t mesh_encode_data(
     uint8_t* out,
     size_t out_len);
 
+size_t mesh_encode_data_ex(const MeshDataEncodeParams* params, uint8_t* out, size_t out_len);
+
 /* Encode the 16 byte header. Returns bytes written, or 0 if out is too small. */
 size_t mesh_encode_header(const MeshTxParams* params, uint8_t* out, size_t out_len);
 
@@ -61,6 +75,8 @@ size_t mesh_encode_frame(const MeshTxParams* params, uint8_t* out, size_t out_le
  * overhead. Callers should use this rather than discovering the limit by
  * getting 0 back from mesh_encode_frame. */
 size_t mesh_encode_max_payload_len(void);
+
+size_t mesh_encode_max_payload_len_with_routing(void);
 
 /* Compatibility wrapper for the text path. */
 size_t mesh_encode_max_text_len(void);

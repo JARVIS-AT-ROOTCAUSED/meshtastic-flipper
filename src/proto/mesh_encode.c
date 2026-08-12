@@ -10,6 +10,9 @@
 
 #define FIELD_PORTNUM 1
 #define FIELD_PAYLOAD 2
+#define FIELD_DEST 4
+#define FIELD_SOURCE 5
+#define FIELD_REQUEST_ID 6
 
 /* Base 128 varint. Returns bytes written, or 0 if it would not fit. */
 static size_t write_varint(uint64_t value, uint8_t* out, size_t out_len) {
@@ -30,45 +33,87 @@ static size_t write_tag(uint32_t field, uint8_t wire, uint8_t* out, size_t out_l
     return write_varint(((uint64_t)field << 3) | wire, out, out_len);
 }
 
+static size_t write_fixed32_value(uint32_t value, uint8_t* out, size_t out_len) {
+    if(out_len < 4) return 0;
+    out[0] = (uint8_t)(value & 0xFF);
+    out[1] = (uint8_t)((value >> 8) & 0xFF);
+    out[2] = (uint8_t)((value >> 16) & 0xFF);
+    out[3] = (uint8_t)((value >> 24) & 0xFF);
+    return 4;
+}
+
+static size_t write_fixed32_field(uint32_t field, uint32_t value, uint8_t* out, size_t out_len) {
+    size_t n;
+    size_t m;
+
+    if(value == 0) return 0;
+    n = write_tag(field, 5, out, out_len);
+    if(n == 0) return 0;
+    m = write_fixed32_value(value, out + n, out_len - n);
+    if(m == 0) return 0;
+    return n + m;
+}
+
 size_t mesh_encode_data(
     uint32_t portnum,
     const uint8_t* payload,
     size_t payload_len,
     uint8_t* out,
     size_t out_len) {
+    MeshDataEncodeParams params;
+    memset(&params, 0, sizeof(params));
+    params.portnum = portnum;
+    params.payload = payload;
+    params.payload_len = payload_len;
+    return mesh_encode_data_ex(&params, out, out_len);
+}
+
+size_t mesh_encode_data_ex(const MeshDataEncodeParams* params, uint8_t* out, size_t out_len) {
     size_t pos = 0;
     size_t n;
 
-    if(out == NULL) return 0;
-    if(payload == NULL && payload_len > 0) return 0;
+    if(params == NULL || out == NULL) return 0;
+    if(params->payload == NULL && params->payload_len > 0) return 0;
 
     /* Field 1, portnum. proto3 omits zero-valued scalars, and matching that is
      * what lets the output be compared byte for byte against a reference
      * encoder. Meshtastic never sends portnum 0 in practice. */
-    if(portnum != 0) {
+    if(params->portnum != 0) {
         n = write_tag(FIELD_PORTNUM, WIRE_VARINT, out + pos, out_len - pos);
         if(n == 0) return 0;
         pos += n;
 
-        n = write_varint(portnum, out + pos, out_len - pos);
+        n = write_varint(params->portnum, out + pos, out_len - pos);
         if(n == 0) return 0;
         pos += n;
     }
 
     /* Field 2, payload. Also omitted when empty, again matching proto3. */
-    if(payload_len > 0) {
+    if(params->payload_len > 0) {
         n = write_tag(FIELD_PAYLOAD, WIRE_LEN, out + pos, out_len - pos);
         if(n == 0) return 0;
         pos += n;
 
-        n = write_varint(payload_len, out + pos, out_len - pos);
+        n = write_varint(params->payload_len, out + pos, out_len - pos);
         if(n == 0) return 0;
         pos += n;
 
-        if(payload_len > out_len - pos) return 0;
-        memcpy(out + pos, payload, payload_len);
-        pos += payload_len;
+        if(params->payload_len > out_len - pos) return 0;
+        memcpy(out + pos, params->payload, params->payload_len);
+        pos += params->payload_len;
     }
+
+    n = write_fixed32_field(FIELD_DEST, params->dest, out + pos, out_len - pos);
+    if(params->dest != 0 && n == 0) return 0;
+    pos += n;
+
+    n = write_fixed32_field(FIELD_SOURCE, params->source, out + pos, out_len - pos);
+    if(params->source != 0 && n == 0) return 0;
+    pos += n;
+
+    n = write_fixed32_field(FIELD_REQUEST_ID, params->request_id, out + pos, out_len - pos);
+    if(params->request_id != 0 && n == 0) return 0;
+    pos += n;
 
     return pos;
 }
@@ -112,6 +157,10 @@ size_t mesh_encode_max_payload_len(void) {
     return MESH_MAX_PAYLOAD - MESH_HEADER_LEN - 5;
 }
 
+size_t mesh_encode_max_payload_len_with_routing(void) {
+    return mesh_encode_max_payload_len() - 15;
+}
+
 size_t mesh_encode_max_text_len(void) {
     return mesh_encode_max_payload_len();
 }
@@ -125,8 +174,16 @@ size_t mesh_encode_frame(const MeshTxParams* params, uint8_t* out, size_t out_le
     if(params->payload == NULL && params->payload_len > 0) return 0;
     if(params->portnum == 0) return 0;
 
-    plaintext_len = mesh_encode_data(
-        params->portnum, params->payload, params->payload_len, plaintext, sizeof(plaintext));
+    MeshDataEncodeParams data_params;
+    memset(&data_params, 0, sizeof(data_params));
+    data_params.portnum = params->portnum;
+    data_params.payload = params->payload;
+    data_params.payload_len = params->payload_len;
+    data_params.dest = params->data_dest;
+    data_params.source = params->data_source;
+    data_params.request_id = params->data_request_id;
+
+    plaintext_len = mesh_encode_data_ex(&data_params, plaintext, sizeof(plaintext));
     if(plaintext_len == 0 && params->payload_len > 0) return 0;
 
     total = MESH_HEADER_LEN + plaintext_len;

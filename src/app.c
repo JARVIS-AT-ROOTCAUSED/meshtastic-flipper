@@ -28,6 +28,8 @@
 #define NODEINFO_FIRST_DELAY_MS  1000
 #define NODEINFO_LEARN_DELAY_MS  5000
 #define NODEINFO_INTERVAL_MS     (60UL * 60UL * 1000UL)
+#define ROUTING_ERROR_NO_CHANNEL 6u
+#define ROUTING_ERROR_PKI_FAILED 34u
 #define ROSTER_CACHE_PATH        APP_DATA_PATH("node_roster.bin")
 #define ROSTER_CACHE_MAGIC       0x4D525331UL /* MRS1 */
 #define ROSTER_CACHE_VERSION     1
@@ -42,6 +44,8 @@ typedef struct {
     uint32_t version;
     uint32_t count;
 } RosterCacheHeader;
+
+static bool is_broadcast_node(uint32_t node_num);
 
 static bool write_all(File* file, const void* data, size_t len) {
     return storage_file_write(file, data, len) == len;
@@ -186,7 +190,10 @@ static void phone_to_radio_callback(const uint8_t* data, size_t len, void* conte
 
     app->phone_text_packets++;
 
-    if(text.text_len > mesh_encode_max_text_len() || text.text_len > sizeof(tx.text)) {
+    size_t max_text_len =
+        is_broadcast_node(text.to) ? mesh_encode_max_text_len() :
+                                     mesh_encode_max_payload_len_with_routing();
+    if(text.text_len > max_text_len || text.text_len > sizeof(tx.text)) {
         FURI_LOG_W("MeshApp", "phone text too large for LoRa frame");
         app->tx_failed++;
         return;
@@ -196,6 +203,12 @@ static void phone_to_radio_callback(const uint8_t* data, size_t len, void* conte
     tx.from = text.from;
     tx.to = text.to;
     tx.packet_id = text.packet_id;
+    tx.data_dest = text.data_dest;
+    tx.data_source = text.data_source;
+    tx.data_request_id = text.data_request_id;
+    tx.channel_index = text.channel_index;
+    tx.has_channel_index = text.has_channel_index;
+    tx.pki_encrypted = text.pki_encrypted;
     tx.hop_limit = text.hop_limit;
     tx.hop_start = text.hop_start;
     tx.want_ack = text.want_ack;
@@ -220,6 +233,31 @@ static void phone_report_tx_done(MeshApp* app, uint32_t packet_id) {
      * queue and was handed to the radio. */
     len = phone_encode_queue_status(1, 1, packet_id, from_radio, sizeof(from_radio));
     if(len == 0 || !meshtastic_ble_service_queue(app->ble, from_radio, len)) {
+        app->phone_bridge_dropped++;
+    }
+}
+
+static void phone_report_tx_error(
+    MeshApp* app,
+    uint32_t phone_node,
+    uint32_t packet_id,
+    uint32_t error_reason) {
+    PhoneIdentity id;
+    uint8_t from_radio[PHONE_BRIDGE_MESSAGE_MAX];
+    size_t len;
+
+    if(app == NULL || app->ble == NULL || packet_id == 0) return;
+
+    phone_identity_from_config(&app->config, &id);
+    len = phone_encode_routing_response(
+        &id,
+        phone_node == 0 ? app->config.owner.node_num : phone_node,
+        packet_id,
+        0,
+        error_reason,
+        from_radio,
+        sizeof(from_radio));
+    if(len == 0 || !meshtastic_ble_service_queue_linger(app->ble, from_radio, len)) {
         app->phone_bridge_dropped++;
     }
 }
@@ -387,6 +425,27 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
             tx.packet_id = random_packet_id();
         }
 
+        if(tx.pki_encrypted) {
+            app->tx_failed++;
+            phone_report_tx_error(app, tx.from, tx.packet_id, ROUTING_ERROR_PKI_FAILED);
+            FURI_LOG_W(
+                "MeshApp",
+                "refused phone text requiring PKI id=%lu",
+                (unsigned long)tx.packet_id);
+            continue;
+        }
+
+        if(tx.has_channel_index && tx.channel_index != 0) {
+            app->tx_failed++;
+            phone_report_tx_error(app, tx.from, tx.packet_id, ROUTING_ERROR_NO_CHANNEL);
+            FURI_LOG_W(
+                "MeshApp",
+                "refused phone text for unsupported channel index=%lu id=%lu",
+                (unsigned long)tx.channel_index,
+                (unsigned long)tx.packet_id);
+            continue;
+        }
+
         MeshTxParams params;
         memset(&params, 0, sizeof(params));
         params.to = tx.to == 0 ? 0xFFFFFFFFu : tx.to;
@@ -403,6 +462,11 @@ static void radio_drain_tx(MeshApp* app, const uint8_t key[MESH_PSK_LEN], uint8_
         params.portnum = MESH_PORTNUM_TEXT_MESSAGE_APP;
         params.payload = tx.text;
         params.payload_len = tx.text_len;
+        if(!is_broadcast_node(params.to)) {
+            params.data_dest = tx.data_dest == 0 ? params.to : tx.data_dest;
+            params.data_source = tx.data_source == 0 ? params.from : tx.data_source;
+            params.data_request_id = tx.data_request_id == 0 ? params.id : tx.data_request_id;
+        }
 
         size_t frame_len = mesh_encode_frame(&params, frame, sizeof(frame));
         if(frame_len == 0) {

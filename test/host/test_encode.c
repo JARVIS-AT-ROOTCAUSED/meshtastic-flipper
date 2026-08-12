@@ -83,6 +83,28 @@ TEST(test_encode_data_rejects_null) {
     ASSERT_EQ_INT(mesh_encode_data(1, VEC0_TEXT, 1, NULL, 10), 0);
 }
 
+TEST(test_encode_data_with_routing_metadata) {
+    uint8_t buf[64];
+    const uint8_t expected[] = {
+        0x08, 0x01,
+        0x12, 0x02, 'd', 'm',
+        0x25, 0x88, 0x77, 0x66, 0x55,
+        0x2d, 0xcc, 0xbb, 0xaa, 0x99,
+        0x35, 0x44, 0x33, 0x22, 0x11};
+    MeshDataEncodeParams p;
+    memset(&p, 0, sizeof(p));
+    p.portnum = MESH_PORTNUM_TEXT_MESSAGE_APP;
+    p.payload = (const uint8_t*)"dm";
+    p.payload_len = 2;
+    p.dest = 0x55667788u;
+    p.source = 0x99aabbccu;
+    p.request_id = 0x11223344u;
+
+    size_t len = mesh_encode_data_ex(&p, buf, sizeof(buf));
+    ASSERT_EQ_INT(len, sizeof(expected));
+    ASSERT_EQ_MEM(buf, expected, sizeof(expected));
+}
+
 /* Header encoding */
 
 TEST(test_encode_header_matches_generator) {
@@ -198,6 +220,33 @@ TEST(test_encode_then_decode_round_trip) {
     ASSERT_EQ_MEM(decoded.data.payload, message, strlen(message));
 }
 
+TEST(test_encode_direct_message_round_trip_carries_routing_metadata) {
+    uint8_t key[MESH_PSK_LEN];
+    uint8_t frame[MESH_MAX_PAYLOAD];
+    MeshDecoded decoded;
+    const char* message = "direct metadata";
+
+    mesh_channel_expand_psk(1, key);
+    MeshTxParams p = vec0_params(key);
+    p.to = 0x55667788u;
+    p.from = 0x99aabbccu;
+    p.id = 0x11223344u;
+    p.payload = (const uint8_t*)message;
+    p.payload_len = strlen(message);
+    p.data_dest = p.to;
+    p.data_source = p.from;
+    p.data_request_id = p.id;
+
+    size_t len = mesh_encode_frame(&p, frame, sizeof(frame));
+    ASSERT_TRUE(len > MESH_HEADER_LEN);
+
+    ASSERT_EQ_INT(mesh_decode_frame(frame, len, key, p.channel_hash, &decoded), MESH_OK);
+    ASSERT_EQ_INT(decoded.data.dest, p.to);
+    ASSERT_EQ_INT(decoded.data.source, p.from);
+    ASSERT_EQ_INT(decoded.data.request_id, p.id);
+    ASSERT_EQ_MEM(decoded.data.payload, message, strlen(message));
+}
+
 TEST(test_encode_nodeinfo_round_trip) {
     uint8_t key[MESH_PSK_LEN];
     uint8_t frame[MESH_MAX_PAYLOAD];
@@ -305,6 +354,7 @@ RUN_TEST(test_encode_data_long_payload_uses_two_byte_length);
 RUN_TEST(test_encode_data_utf8_is_byte_exact);
 RUN_TEST(test_encode_data_rejects_small_buffer);
 RUN_TEST(test_encode_data_rejects_null);
+RUN_TEST(test_encode_data_with_routing_metadata);
 RUN_TEST(test_encode_header_matches_generator);
 RUN_TEST(test_encode_header_flag_packing);
 RUN_TEST(test_encode_header_rejects_small_buffer);
@@ -312,6 +362,7 @@ RUN_TEST(test_encode_frame_reproduces_generator_byte_for_byte);
 RUN_TEST(test_encode_frame_matches_generator_for_long_text);
 RUN_TEST(test_encode_frame_with_second_psk_matches_generator);
 RUN_TEST(test_encode_then_decode_round_trip);
+RUN_TEST(test_encode_direct_message_round_trip_carries_routing_metadata);
 RUN_TEST(test_encode_nodeinfo_round_trip);
 RUN_TEST(test_round_trip_at_maximum_text_length);
 RUN_TEST(test_encode_frame_refuses_oversized_text);

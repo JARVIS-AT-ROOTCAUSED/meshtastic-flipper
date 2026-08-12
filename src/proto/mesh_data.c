@@ -9,6 +9,10 @@
 
 #define FIELD_PORTNUM 1
 #define FIELD_PAYLOAD 2
+#define FIELD_WANT_RESPONSE 3
+#define FIELD_DEST 4
+#define FIELD_SOURCE 5
+#define FIELD_REQUEST_ID 6
 
 /* Read a base 128 varint and advance *pos.
  *
@@ -43,6 +47,10 @@ bool mesh_data_parse(const uint8_t* buf, size_t len, MeshData* out) {
     out->portnum = 0;
     out->payload = NULL;
     out->payload_len = 0;
+    out->dest = 0;
+    out->source = 0;
+    out->request_id = 0;
+    out->want_response = false;
 
     while(pos < len) {
         uint64_t tag;
@@ -61,6 +69,7 @@ bool mesh_data_parse(const uint8_t* buf, size_t len, MeshData* out) {
             uint64_t value;
             if(!read_varint(buf, len, &pos, &value)) return false;
             if(field == FIELD_PORTNUM) out->portnum = (uint32_t)value;
+            if(field == FIELD_WANT_RESPONSE) out->want_response = value != 0;
             break;
         }
         case WIRE_LEN: {
@@ -76,6 +85,14 @@ bool mesh_data_parse(const uint8_t* buf, size_t len, MeshData* out) {
         }
         case WIRE_FIXED32:
             if(len - pos < 4) return false;
+            if(field == FIELD_DEST || field == FIELD_SOURCE || field == FIELD_REQUEST_ID) {
+                uint32_t value = (uint32_t)buf[pos] | ((uint32_t)buf[pos + 1] << 8) |
+                                 ((uint32_t)buf[pos + 2] << 16) |
+                                 ((uint32_t)buf[pos + 3] << 24);
+                if(field == FIELD_DEST) out->dest = value;
+                if(field == FIELD_SOURCE) out->source = value;
+                if(field == FIELD_REQUEST_ID) out->request_id = value;
+            }
             pos += 4;
             break;
         case WIRE_FIXED64:

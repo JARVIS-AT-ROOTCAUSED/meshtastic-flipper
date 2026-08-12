@@ -30,6 +30,10 @@ typedef struct {
     uint32_t portnum;
     const uint8_t* payload;
     size_t payload_len;
+    uint32_t dest;
+    uint32_t source;
+    uint32_t request_id;
+    bool want_response;
 } MeshData;
 
 /* Returns false on malformed input, leaving out zeroed.

@@ -23,6 +23,8 @@
 #define MESHPACKET_FIELD_WANT_ACK            10
 #define MESHPACKET_FIELD_VIA_MQTT            14
 #define MESHPACKET_FIELD_HOP_START           15
+#define MESHPACKET_FIELD_PUBLIC_KEY          16
+#define MESHPACKET_FIELD_PKI_ENCRYPTED       17
 #define MESHPACKET_FIELD_NEXT_HOP            18
 #define MESHPACKET_FIELD_RELAY_NODE          19
 #define MESHPACKET_FIELD_TRANSPORT_MECHANISM 21
@@ -31,6 +33,8 @@
 #define DATA_FIELD_PORTNUM       1
 #define DATA_FIELD_PAYLOAD       2
 #define DATA_FIELD_WANT_RESPONSE 3
+#define DATA_FIELD_DEST          4
+#define DATA_FIELD_SOURCE        5
 #define DATA_FIELD_REQUEST_ID    6
 
 /* portnums.proto. */
@@ -361,6 +365,7 @@ bool phone_decode_text_message(const uint8_t* buf, size_t len, PhoneTextMessage*
     size_t data_len = 0;
     size_t payload_len = 0;
     uint64_t value = 0;
+    MeshData decoded;
 
     if(out == NULL) return false;
     memset(out, 0, sizeof(*out));
@@ -372,11 +377,9 @@ bool phone_decode_text_message(const uint8_t* buf, size_t len, PhoneTextMessage*
     if(!scan_field(packet, packet_len, MESHPACKET_FIELD_DECODED, &data, &data_len, NULL))
         return false;
 
-    if(!scan_field(data, data_len, DATA_FIELD_PORTNUM, NULL, NULL, &value)) return false;
-    if(value != MESH_PORTNUM_TEXT_MESSAGE_APP) return false;
-
-    if(!scan_field(data, data_len, DATA_FIELD_PAYLOAD, &payload, &payload_len, NULL)) return false;
-    if(payload_len == 0) return false;
+    if(!mesh_data_parse(data, data_len, &decoded)) return false;
+    if(decoded.portnum != MESH_PORTNUM_TEXT_MESSAGE_APP) return false;
+    if(decoded.payload_len == 0) return false;
 
     if(scan_field(packet, packet_len, MESHPACKET_FIELD_TO, NULL, NULL, &value)) {
         out->to = (uint32_t)value;
@@ -396,9 +399,23 @@ bool phone_decode_text_message(const uint8_t* buf, size_t len, PhoneTextMessage*
     if(scan_field(packet, packet_len, MESHPACKET_FIELD_WANT_ACK, NULL, NULL, &value)) {
         out->want_ack = value != 0;
     }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_CHANNEL, NULL, NULL, &value)) {
+        out->channel_index = (uint32_t)value;
+        out->has_channel_index = true;
+    }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_PKI_ENCRYPTED, NULL, NULL, &value)) {
+        out->pki_encrypted = value != 0;
+    }
+    if(scan_field(packet, packet_len, MESHPACKET_FIELD_PUBLIC_KEY, &payload, &payload_len, NULL) &&
+       payload_len > 0) {
+        out->pki_encrypted = true;
+    }
 
-    out->text = payload;
-    out->text_len = payload_len;
+    out->data_dest = decoded.dest;
+    out->data_source = decoded.source;
+    out->data_request_id = decoded.request_id;
+    out->text = decoded.payload;
+    out->text_len = decoded.payload_len;
     return true;
 }
 
@@ -866,6 +883,17 @@ size_t phone_encode_routing_ack(
     uint32_t relay_node,
     uint8_t* out,
     size_t out_len) {
+    return phone_encode_routing_response(id, to, request_id, relay_node, 0, out, out_len);
+}
+
+size_t phone_encode_routing_response(
+    const PhoneIdentity* id,
+    uint32_t to,
+    uint32_t request_id,
+    uint32_t relay_node,
+    uint32_t error_reason,
+    uint8_t* out,
+    size_t out_len) {
     uint8_t routing[8];
     uint8_t data[32];
     uint8_t packet[96];
@@ -874,7 +902,7 @@ size_t phone_encode_routing_ack(
     if(id == NULL || out == NULL || request_id == 0) return 0;
 
     pb_writer_init(&w, routing, sizeof(routing));
-    pb_write_varint_field_always(&w, ROUTING_FIELD_ERROR_REASON, 0);
+    pb_write_varint_field_always(&w, ROUTING_FIELD_ERROR_REASON, error_reason);
     if(!pb_writer_ok(&w)) return 0;
     size_t routing_len = pb_writer_len(&w);
 

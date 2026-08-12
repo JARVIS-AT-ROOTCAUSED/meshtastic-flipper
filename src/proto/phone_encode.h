@@ -246,6 +246,12 @@ typedef struct {
     uint32_t from;
     uint32_t to;
     uint32_t packet_id;
+    uint32_t data_dest;
+    uint32_t data_source;
+    uint32_t data_request_id;
+    uint32_t channel_index;
+    bool has_channel_index;
+    bool pki_encrypted;
     uint8_t hop_limit;
     uint8_t hop_start;
     bool want_ack;
@@ -330,6 +336,15 @@ size_t phone_encode_routing_ack(
     uint32_t to,
     uint32_t request_id,
     uint32_t relay_node,
+    uint8_t* out,
+    size_t out_len);
+
+size_t phone_encode_routing_response(
+    const PhoneIdentity* id,
+    uint32_t to,
+    uint32_t request_id,
+    uint32_t relay_node,
+    uint32_t error_reason,
     uint8_t* out,
     size_t out_len);
 

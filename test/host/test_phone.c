@@ -438,6 +438,50 @@ TEST(test_decode_phone_text_message) {
     ASSERT_EQ_MEM(text.text, body, sizeof(body) - 1);
 }
 
+TEST(test_decode_phone_direct_text_metadata) {
+    uint8_t data[96];
+    uint8_t packet[160];
+    uint8_t to_radio[192];
+    uint8_t public_key[32];
+    PbWriter w;
+    PhoneTextMessage text;
+    const uint8_t body[] = "private?";
+
+    memset(public_key, 0x42, sizeof(public_key));
+
+    pb_writer_init(&w, data, sizeof(data));
+    pb_write_varint_field_always(&w, 1, MESH_PORTNUM_TEXT_MESSAGE_APP);
+    pb_write_bytes_field(&w, 2, body, sizeof(body) - 1);
+    pb_write_fixed32_field(&w, 4, 0x11223344u);
+    pb_write_fixed32_field(&w, 5, 0x55667788u);
+    pb_write_fixed32_field(&w, 6, 0xaabbccddu);
+    size_t data_len = pb_writer_len(&w);
+
+    pb_writer_init(&w, packet, sizeof(packet));
+    pb_write_fixed32_field_always(&w, 1, 0x55667788u);
+    pb_write_fixed32_field_always(&w, 2, 0x11223344u);
+    pb_write_varint_field_always(&w, 3, 0);
+    pb_write_submessage(&w, 4, data, data_len);
+    pb_write_fixed32_field_always(&w, 6, 0xaabbccddu);
+    pb_write_bytes_field(&w, 16, public_key, sizeof(public_key));
+    pb_write_varint_field(&w, 17, 1);
+    size_t packet_len = pb_writer_len(&w);
+
+    pb_writer_init(&w, to_radio, sizeof(to_radio));
+    pb_write_submessage(&w, TORADIO_FIELD_PACKET, packet, packet_len);
+
+    ASSERT_TRUE(phone_decode_text_message(to_radio, pb_writer_len(&w), &text));
+    ASSERT_EQ_INT(text.from, 0x55667788u);
+    ASSERT_EQ_INT(text.to, 0x11223344u);
+    ASSERT_TRUE(text.has_channel_index);
+    ASSERT_EQ_INT(text.channel_index, 0);
+    ASSERT_TRUE(text.pki_encrypted);
+    ASSERT_EQ_INT(text.data_dest, 0x11223344u);
+    ASSERT_EQ_INT(text.data_source, 0x55667788u);
+    ASSERT_EQ_INT(text.data_request_id, 0xaabbccddu);
+    ASSERT_EQ_MEM(text.text, body, sizeof(body) - 1);
+}
+
 TEST(test_routing_ack_references_original_packet) {
     PhoneIdentity id = identity();
     uint8_t out[128];
@@ -469,6 +513,27 @@ TEST(test_routing_ack_references_original_packet) {
     ASSERT_EQ_INT(value, 0);
     ASSERT_TRUE(find_fixed32_field(data, data_len, 6, &fixed));
     ASSERT_EQ_INT(fixed, 0x12345678u);
+}
+
+TEST(test_routing_response_reports_error_reason) {
+    PhoneIdentity id = identity();
+    uint8_t out[128];
+    const uint8_t* packet = NULL;
+    const uint8_t* data = NULL;
+    const uint8_t* routing = NULL;
+    size_t packet_len = 0;
+    size_t data_len = 0;
+    size_t routing_len = 0;
+    uint64_t value = 0;
+
+    size_t len = phone_encode_routing_response(
+        &id, 0x55667788u, 0x12345678u, 0, 34, out, sizeof(out));
+    ASSERT_TRUE(len > 0);
+    ASSERT_TRUE(find_field(out, len, FROMRADIO_FIELD_PACKET, NULL, &packet, &packet_len));
+    ASSERT_TRUE(find_field(packet, packet_len, 4, NULL, &data, &data_len));
+    ASSERT_TRUE(find_field(data, data_len, 2, NULL, &routing, &routing_len));
+    ASSERT_TRUE(find_field(routing, routing_len, 3, &value, NULL, NULL));
+    ASSERT_EQ_INT(value, 34);
 }
 
 /* ToRadio decode */
@@ -552,7 +617,9 @@ RUN_TEST(test_received_radio_packet_is_forwarded_to_phone_shape);
 RUN_TEST(test_oversized_received_packet_is_not_forwarded);
 RUN_TEST(test_queue_status_reports_mesh_packet_id);
 RUN_TEST(test_decode_phone_text_message);
+RUN_TEST(test_decode_phone_direct_text_metadata);
 RUN_TEST(test_routing_ack_references_original_packet);
+RUN_TEST(test_routing_response_reports_error_reason);
 RUN_TEST(test_decode_want_config_id);
 RUN_TEST(test_decode_skips_other_fields);
 RUN_TEST(test_decode_reports_absent_want_config_id);

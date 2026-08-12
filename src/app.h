@@ -38,6 +38,12 @@ typedef struct {
     uint32_t from;
     uint32_t to;
     uint32_t packet_id;
+    uint32_t data_dest;
+    uint32_t data_source;
+    uint32_t data_request_id;
+    uint32_t channel_index;
+    bool has_channel_index;
+    bool pki_encrypted;
     uint8_t hop_limit;
     uint8_t hop_start;
     bool want_ack;

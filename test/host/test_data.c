@@ -72,6 +72,25 @@ TEST(test_skips_unknown_fixed32_field) {
     ASSERT_EQ_MEM(d.payload, "ok", 2);
 }
 
+TEST(test_parses_routing_metadata) {
+    const uint8_t buf[] = {
+        0x08, 0x01,
+        0x12, 0x02, 'd', 'm',
+        0x18, 0x01,
+        0x25, 0x88, 0x77, 0x66, 0x55,
+        0x2d, 0xcc, 0xbb, 0xaa, 0x99,
+        0x35, 0x44, 0x33, 0x22, 0x11};
+    MeshData d;
+    ASSERT_TRUE(mesh_data_parse(buf, sizeof(buf), &d));
+    ASSERT_EQ_INT(d.portnum, MESH_PORTNUM_TEXT_MESSAGE_APP);
+    ASSERT_EQ_INT(d.payload_len, 2);
+    ASSERT_EQ_MEM(d.payload, "dm", 2);
+    ASSERT_TRUE(d.want_response);
+    ASSERT_EQ_INT(d.dest, 0x55667788u);
+    ASSERT_EQ_INT(d.source, 0x99aabbccu);
+    ASSERT_EQ_INT(d.request_id, 0x11223344u);
+}
+
 TEST(test_skips_unknown_fixed64_field) {
     const uint8_t buf[] = {0x29, 1, 2, 3, 4, 5, 6, 7, 8, 0x12, 0x02, 'o', 'k'};
     MeshData d;
@@ -161,6 +180,7 @@ RUN_TEST(test_payload_points_into_caller_buffer);
 RUN_TEST(test_skips_unknown_varint_field);
 RUN_TEST(test_skips_unknown_length_delimited_field);
 RUN_TEST(test_skips_unknown_fixed32_field);
+RUN_TEST(test_parses_routing_metadata);
 RUN_TEST(test_skips_unknown_fixed64_field);
 RUN_TEST(test_rejects_truncated_varint);
 RUN_TEST(test_rejects_tag_with_no_value);
